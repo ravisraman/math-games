@@ -1,8 +1,23 @@
 # Math Quest 数学探险
 
-A small portal of four math games for a 2nd grader. It is built for a MacBook and
-played with the **arrow keys, space bar and return key**, so no typing is needed.
-Progress saves automatically.
+A small portal of four math games for a 2nd grader. It works on a **MacBook** (played with
+the arrow keys, space bar and return key, so no typing is needed) and on an **iPhone**
+(tap, swipe and drag, upright or sideways). Progress saves automatically.
+
+**Play online:** https://ravisraman.github.io/math-games/
+
+## On the iPhone
+
+Open the link above in Safari, tap the **Share** button, then **Add to Home Screen**. Math
+Quest then opens full-screen like an app, with its own icon, and keeps working offline.
+Each device keeps its own progress; use **⚙️ → Download backup / Restore backup** to move it.
+
+| Game | Laptop | iPhone |
+|------|--------|--------|
+| Coin Crossing | arrow keys, space = put back | tap to hop up, swipe to turn, ↩ Put back button |
+| Number Flow | arrow keys + space, or drag with the trackpad | drag paths with a finger |
+| Clock Tower | ← → long hand, ↑ ↓ short hand, return | drag the hands, or use the 5 min / 1 hour buttons |
+| Castle Climb | ← → walk, ↑ jump | tap the right answer |
 
 ## How to play
 
@@ -99,6 +114,7 @@ games/coin-crossing/                Coin Crossing
 games/number-flow/                  Number Flow
 games/clock-tower/                  Clock Tower
 games/castle-climb/                 Castle Climb (problems.js holds the math generator)
+manifest.webmanifest, sw.js, icons/ home-screen app + offline support
 ```
 
 Plain HTML, CSS and JavaScript. There is no build step and nothing to install.
