@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Coin Crossing</title>
+  <link rel="stylesheet" href="../../shared/style.css">
+  <link rel="stylesheet" href="game.css">
+</head>
+<body>
+  <main class="layout">
+    <div class="stage" id="stage">
+      <canvas id="board" aria-label="Coin Crossing game board"></canvas>
+      <div class="overlay" id="overlay" hidden></div>
+    </div>
+
+    <aside class="panel">
+      <div class="panel-top">
+        <a class="home" href="../../index.html" title="Back to the portal">🏠</a>
+        <div class="level-pill">Level <span id="level">1</span></div>
+        <div class="star-pill">⭐ <span id="stars">0</span></div>
+      </div>
+
+      <section class="box target-box">
+        <div class="label">🏰 Castle needs</div>
+        <div class="big" id="target">—</div>
+        <div class="zh sub" id="target-zh"></div>
+      </section>
+
+      <section class="box pouch-box">
+        <div class="label">👝 In your pouch</div>
+        <div class="big" id="pouch">0¢</div>
+        <div class="zh sub" id="pouch-zh"></div>
+        <div class="pouch-coins" id="pouch-coins"></div>
+        <div class="need" id="need"></div>
+      </section>
+
+      <section class="bubble" id="bubble" aria-live="polite">
+        <span class="mascot">🐼</span>
+        <span id="message">Hop with the arrow keys!</span>
+      </section>
+
+      <section class="controls">
+        <div><span class="key">←</span><span class="key">↑</span><span class="key">↓</span><span class="key">→</span> hop</div>
+        <div><span class="key">space</span> put a coin back</div>
+        <div><span class="key">esc</span> pause</div>
+      </section>
+    </aside>
+  </main>
+
+  <script src="../../shared/core.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>

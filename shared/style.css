@@ -1,0 +1,100 @@
+:root {
+  --bg: #fff8ec;
+  --bg2: #ffe9c7;
+  --ink: #2d2a32;
+  --muted: #6b6475;
+  --card: #ffffff;
+  --line: #eadfcd;
+  --accent: #ff7a3d;
+  --accent-ink: #ffffff;
+  --good: #2e9e5b;
+  --bad: #d9534f;
+  --gold: #f5b700;
+  --sky: #4aa8ff;
+  --focus: #4aa8ff;
+  --radius: 18px;
+  --font: ui-rounded, "SF Pro Rounded", "Avenir Next Rounded", "Arial Rounded MT Bold", "Nunito", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 4px solid var(--focus);
+  outline-offset: 3px;
+}
+
+.btn {
+  border: none;
+  border-radius: 14px;
+  padding: 12px 20px;
+  font-size: 20px;
+  font-weight: 700;
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: 0 4px 0 #c9541f;
+  transition: transform 0.08s;
+}
+.btn:active { transform: translateY(3px); box-shadow: 0 1px 0 #c9541f; }
+.btn.secondary { background: #ece3d4; color: var(--ink); box-shadow: 0 4px 0 #cbbfa9; }
+.btn.small { font-size: 15px; padding: 7px 12px; }
+
+.key {
+  display: inline-block;
+  min-width: 1.8em;
+  padding: 1px 7px;
+  border: 2px solid #cbbfa9;
+  border-bottom-width: 4px;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 0.85em;
+  font-weight: 700;
+  text-align: center;
+  line-height: 1.4;
+}
+
+.zh { font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Heiti SC", sans-serif; }
+
+/* ---------- Coins & bills (used in HUD, quizzes, legends) ---------- */
+.coin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-weight: 800;
+  font-size: 11px;
+  vertical-align: middle;
+  flex: none;
+  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.18), 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+.coin.c1 { width: 30px; height: 30px; background: radial-gradient(circle at 35% 30%, #e7a36b, #c8793a 60%, #9a5624); color: #fff; }
+.coin.c5 { width: 36px; height: 36px; background: radial-gradient(circle at 35% 30%, #eef0f2, #c3c7cc 60%, #8e949b); color: #333; }
+.coin.c10 { width: 26px; height: 26px; background: radial-gradient(circle at 35% 30%, #ffffff, #d3d7dc 60%, #9ca2a9); color: #333; font-size: 10px; }
+.coin.c25 { width: 42px; height: 42px; background: radial-gradient(circle at 35% 30%, #f4f5f6, #b8bdc3 60%, #858b92); color: #333; font-size: 12px; }
+.bill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 58px;
+  height: 30px;
+  border-radius: 5px;
+  border: 2px solid #2f6b2f;
+  background: repeating-linear-gradient(90deg, #a8d8a0 0 6px, #9ccf93 6px 12px);
+  color: #1f4d1f;
+  font-weight: 900;
+  font-size: 14px;
+  vertical-align: middle;
+  flex: none;
+}
+.bill.b5 { background: repeating-linear-gradient(90deg, #c9c3e8 0 6px, #bdb6e0 6px 12px); border-color: #4b3f8f; color: #2f2766; }
