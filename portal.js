@@ -16,16 +16,19 @@
       id: 'numberFlow', name: 'Number Flow', zh: '数字连线', href: 'games/number-flow/index.html',
       art: ['🔵', '➕', '🟢'], theme: 'flow', skill: 'Adding',
       what: 'Draw paths through numbers that add up to the target — like Flow Free.',
+      levels: 'Boards grow from 4×4 with 2 pairs to 7×7 with 5 pairs; numbers from 1–5 up to 10s and 20s; targets from 5 up to ~60.',
     },
     {
       id: 'clockTower', name: 'Clock Tower', zh: '钟楼', href: 'games/clock-tower/index.html',
       art: ['🕰️', '🔔', '⭐'], theme: 'clock', skill: 'Time',
       what: 'Be the clock keeper: read and set the clock, and figure out elapsed time.',
+      levels: 'L1 o\'clock & half past · L2 quarter past/to · L3 5-minute times · L4 elapsed hours + a.m./p.m. · L5 elapsed minutes · L6 1-minute times · 7+ mixed.',
     },
     {
       id: 'castleClimb', name: 'Castle Climb', zh: '爬城堡', href: 'games/castle-climb/index.html',
       art: ['🏯', '🏮', '🎆'], theme: 'climb', skill: 'Math facts',
       what: 'Jump to the right answer to climb the tower. Adding and subtracting facts.',
+      levels: 'L1 +10 · L2 −10 · L3 +20 make-ten · L4 ±20 · L5 tens · L6 2-digit±1-digit · L7–8 2-digit±2-digit · L9 three numbers · L10 missing numbers · 11+ review to 100.',
     },
   ];
 

@@ -1,6 +1,6 @@
 # Math Quest 数学探险
 
-A small, growing portal of math games for a 2nd grader. It is built for a MacBook and
+A small portal of four math games for a 2nd grader. It is built for a MacBook and
 played with the **arrow keys, space bar and return key**, so no typing is needed.
 Progress saves automatically.
 
@@ -60,11 +60,34 @@ A grown-up can also set the level by hand with the −/+ buttons in **Grown-ups*
 
 Stars unlock new heroes (🐸 🐼 🐯 🐲 🦄 🤖 🦖) on the portal.
 
-### Coming next
+### 🔗 Number Flow (playable)
 
-- 🕰️ **Clock Tower**: move the hands to set the time before the bell rings (hour/minute hands, elapsed time).
-- 🔗 **Number Flow**: a Flow Free–style puzzle where the paths must add up to a target number.
-- 🏯 **Castle Climb**: fast addition and subtraction facts to climb the tower.
+A Flow Free–style puzzle. Draw a path from each colored dot to its partner, and make the
+numbers along the path add up to exactly the dots' target. A live running sum sits at the
+tip of the path, and the side panel shows the addition sentence (in Chinese too). Boards
+grow from 4×4 with 2 pairs up to 7×7 with 5 pairs. Music: Pachelbel's Canon.
+
+### 🕰️ Clock Tower (playable)
+
+Be the village clock keeper. Set the clock with the arrow keys (← → long hand, ↑ ↓ short
+hand), read clocks, match "quarter past / half past / quarter to", and work out elapsed time.
+Each right answer lights a tower window, and the top rings the bell. Levels go from o'clock
+and half past up to 1-minute times and elapsed time that crosses the hour. Music: Bach's
+Minuet in G.
+
+### 🏯 Castle Climb (playable)
+
+Addition and subtraction fact fluency. Walk under the ledge with the right answer and jump
+to climb the pagoda. A wrong ledge crumbles gently, and a strategy hint appears (make a ten,
+doubles, count on, think addition). Missed facts come back later. Levels go from sums
+within 10 up to 2-digit regrouping, three addends and missing numbers. Music: Beethoven's
+Für Elise.
+
+### Sounds and music
+
+All sounds are synthesized in the browser: soft harp, music box, bass and timpani with a
+gentle reverb. Each game plays a public-domain classical piece. Press **M** to turn music on
+or off; grown-ups can also switch music, sounds, read-aloud and Chinese numbers separately.
 
 ## Project layout
 
@@ -72,7 +95,10 @@ Stars unlock new heroes (🐸 🐼 🐯 🐲 🦄 🤖 🦖) on the portal.
 index.html, portal.css, portal.js   the portal (game picker, heroes, grown-ups corner)
 shared/core.js                      save data, sounds, read-aloud, money + Chinese number helpers
 shared/style.css                    shared look (colors, coins, key caps)
-games/coin-crossing/                the Coin Crossing game
+games/coin-crossing/                Coin Crossing
+games/number-flow/                  Number Flow
+games/clock-tower/                  Clock Tower
+games/castle-climb/                 Castle Climb (problems.js holds the math generator)
 ```
 
 Plain HTML, CSS and JavaScript. There is no build step and nothing to install.
