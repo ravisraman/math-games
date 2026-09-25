@@ -228,6 +228,7 @@
     if (DIRS[k] || k === ' ' || k === 'Enter' || k === 'Escape') e.preventDefault();
     MQ.Sound.ensure();
 
+    if ((k === 'm' || k === 'M') && !e.repeat) { toggleMusic(); return; }
     if (state === 'play') {
       if (DIRS[k] && !e.repeat) tryMove(...DIRS[k]);
       else if (k === ' ' && !e.repeat) putBack();
@@ -236,6 +237,13 @@
     }
     if (overlayKeys) overlayKeys(k, e);
   });
+
+  function toggleMusic() {
+    data.settings.music = data.settings.music === false;
+    MQ.applySettings(data.settings);
+    persist();
+    say(data.settings.music ? '🎵 Music on' : '🔇 Music off');
+  }
 
   function tryMove(dr, dc) {
     if (player.t < 1) { queuedMove = [dr, dc]; return; }
@@ -255,7 +263,7 @@
     player.r = nr;
     player.c = nc;
     player.t = 0;
-    MQ.Sound.hop();
+    MQ.Sound.hop(START_ROW - Math.max(nr, 1), dr === 0);
   }
 
   function onLand() {
@@ -282,7 +290,7 @@
     }
     coin.taken = true;
     pouch.push(coin);
-    MQ.Sound.coin();
+    MQ.Sound.coin(coin.v);
     const { x, y } = cellCenter(coin.r, coin.c);
     burst(x, y, coin.v >= 100 ? '#6fcf6f' : '#ffd23f', 14);
     floaters.push({ x, y: y - 20, text: `+${coin.v >= 100 ? MQ.dollars(coin.v) : coin.v + '¢'}`, life: 1 });
@@ -402,7 +410,6 @@
       </div>`,
       (k) => { if (k === 'Enter' || k === ' ') startQuiz(); }
     );
-    MQ.Sound.star();
   }
 
   // ---------- Bonus questions between levels ----------
@@ -572,8 +579,8 @@
       const right = q.options[sel] === q.answer;
       const s = (g.quiz[type] = g.quiz[type] || { right: 0, tries: 0 });
       s.tries++;
-      if (right) { s.right++; data.stars++; MQ.Sound.star(); MQ.Voice.say(data.settings.chinese ? '对了!' : 'Correct!', data.settings.chinese ? 'zh-CN' : 'en-US', { interrupt: true }); }
-      else { MQ.Sound.nope(); MQ.Voice.say(`The answer is ${q.answer.replace('¢', ' cents')}`, 'en-US', { interrupt: true }); }
+      if (right) { s.right++; data.stars++; MQ.Sound.correct(); MQ.Voice.say(data.settings.chinese ? '对了!' : 'Correct!', data.settings.chinese ? 'zh-CN' : 'en-US', { interrupt: true }); }
+      else { MQ.Sound.wrong(); MQ.Voice.say(`The answer is ${q.answer.replace('¢', ' cents')}`, 'en-US', { interrupt: true }); }
       persist();
       updateHud();
       render(right ? 'right' : 'wrong');
@@ -1047,6 +1054,7 @@
   window.__coinCrossing = { quiz: QUIZ, get state() { return state; }, get target() { return target; }, get coins() { return coins; }, get player() { return player; }, total, get level() { return g.level; } };
 
   resize();
+  MQ.Music.play('prelude');
   newLevel();
   showIntro();
   requestAnimationFrame(frame);

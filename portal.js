@@ -155,6 +155,7 @@
           <h3>Player & settings</h3>
           <label>Name <input type="text" id="gp-name" maxlength="20" value="${MQ.escapeHtml(data.player.name || '')}"></label>
           <label><input type="checkbox" id="gp-sound" ${data.settings.sound ? 'checked' : ''}> Sound effects</label>
+          <label><input type="checkbox" id="gp-music" ${data.settings.music !== false ? 'checked' : ''}> Background music (Bach, Mozart)</label>
           <label><input type="checkbox" id="gp-voice" ${data.settings.voice ? 'checked' : ''}> Read questions aloud</label>
           <label><input type="checkbox" id="gp-chinese" ${data.settings.chinese ? 'checked' : ''}> Show amounts in Chinese too (四十七分)</label>
           <p class="muted">Total play time: ${minutes(data.playSeconds)} · Stars: ${data.stars}</p>
@@ -202,6 +203,7 @@
       MQ.save(data);
     });
     setting('gp-sound', 'sound');
+    setting('gp-music', 'music');
     setting('gp-voice', 'voice');
     setting('gp-chinese', 'chinese');
     $('gp-name').addEventListener('input', (e) => { data.player.name = e.target.value.trim(); MQ.save(data); render(); });
@@ -250,6 +252,7 @@
   $('gp-close').addEventListener('click', () => $('grownups').close());
   $('grownups').addEventListener('close', () => { data = MQ.load(); render(); focusFirst(); });
 
+  MQ.Music.play('twinkle');
   render();
   if (!data.player.name) askName();
   else focusFirst();

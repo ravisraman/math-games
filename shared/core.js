@@ -21,7 +21,7 @@
     return {
       version: 1,
       player: { name: '', hero: '🐥' },
-      settings: { sound: true, voice: true, chinese: true },
+      settings: { sound: true, music: true, voice: true, chinese: true },
       stars: 0,
       playSeconds: 0,
       games: {},
@@ -82,45 +82,373 @@
     return HEROES.filter((h) => stars >= h.stars);
   }
 
-  // ---------- Sound effects (synthesized, no audio files needed) ----------
-  const Sound = {
-    enabled: true,
+  // ---------- Audio: soft synthesized instruments + classical background music ----------
+  // Everything is generated with the Web Audio API — no audio files. Instruments are gentle
+  // (harp, music box, soft bass, timpani) and run through a small reverb so it all feels calm.
+  const midiHz = (m) => 440 * Math.pow(2, (m - 69) / 12);
+
+  const Audio = {
     ctx: null,
-    ensure() {
-      if (!this.enabled) return null;
+    unlocked: false,
+    init() {
+      if (this.ctx) return this.ctx;
       try {
-        if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-        if (this.ctx.state === 'suspended') this.ctx.resume();
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const comp = ctx.createDynamicsCompressor();
+        comp.threshold.value = -18;
+        comp.ratio.value = 3;
+        comp.connect(ctx.destination);
+        this.master = ctx.createGain();
+        this.master.gain.value = 0.9;
+        this.master.connect(comp);
+
+        // Reverb from a generated, softly decaying noise impulse.
+        const len = Math.floor(ctx.sampleRate * 2.4);
+        const ir = ctx.createBuffer(2, len, ctx.sampleRate);
+        for (let ch = 0; ch < 2; ch++) {
+          const d = ir.getChannelData(ch);
+          for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.2);
+        }
+        this.reverb = ctx.createConvolver();
+        this.reverb.buffer = ir;
+        const wet = ctx.createGain();
+        wet.gain.value = 0.45;
+        this.reverb.connect(wet).connect(this.master);
+
+        this.sfx = ctx.createGain();
+        this.sfx.gain.value = 0.8;
+        this.sfx.connect(this.master);
+        const sfxSend = ctx.createGain();
+        sfxSend.gain.value = 0.25;
+        this.sfx.connect(sfxSend).connect(this.reverb);
+
+        this.music = ctx.createGain();
+        this.music.gain.value = 0;
+        this.music.connect(this.master);
+        const musicSend = ctx.createGain();
+        musicSend.gain.value = 0.6;
+        this.music.connect(musicSend).connect(this.reverb);
+
+        const nb = ctx.createBuffer(1, ctx.sampleRate * 0.5, ctx.sampleRate);
+        const nd = nb.getChannelData(0);
+        for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+        this.noise = nb;
+        this.ctx = ctx;
       } catch (e) {
-        return null;
+        this.ctx = null;
       }
       return this.ctx;
     },
-    tone(freq, dur, type = 'sine', vol = 0.12, when = 0) {
+    unlock() {
+      const ctx = this.init();
+      if (!ctx) return;
+      if (ctx.state === 'suspended') ctx.resume();
+      if (!this.unlocked) {
+        this.unlocked = true;
+        Music._startIfWanted();
+      }
+    },
+  };
+
+  // Instruments. Each schedules one note at time t on the given bus.
+  const Inst = {
+    // Plucked harp: triangle + soft octave, darkening as it rings.
+    harp(bus, midi, t, dur, vel) {
+      const ctx = Audio.ctx;
+      const f = midiHz(midi);
+      const g = ctx.createGain();
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.setValueAtTime(Math.min(6000, f * 6), t);
+      lp.frequency.exponentialRampToValueAtTime(Math.max(300, f * 1.5), t + dur);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vel, t + 0.006);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      const o1 = ctx.createOscillator();
+      o1.type = 'triangle';
+      o1.frequency.value = f;
+      const o2 = ctx.createOscillator();
+      o2.type = 'sine';
+      o2.frequency.value = f * 2;
+      const g2 = ctx.createGain();
+      g2.gain.value = 0.25;
+      o1.connect(lp);
+      o2.connect(g2).connect(lp);
+      lp.connect(g).connect(bus);
+      o1.start(t); o2.start(t);
+      o1.stop(t + dur + 0.05); o2.stop(t + dur + 0.05);
+    },
+    // Music box / celesta: pure tone with a quick bright shimmer on top.
+    bell(bus, midi, t, dur, vel) {
+      const ctx = Audio.ctx;
+      const f = midiHz(midi);
+      [[1, 1, dur], [2, 0.18, dur * 0.5], [3, 0.08, dur * 0.25], [4.2, 0.05, dur * 0.15]].forEach(([mult, amp, d]) => {
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = 'sine';
+        o.frequency.value = f * mult;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(vel * amp, t + 0.004);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+        o.connect(g).connect(bus);
+        o.start(t);
+        o.stop(t + d + 0.05);
+      });
+    },
+    // Warm, quiet bass note.
+    bass(bus, midi, t, dur, vel) {
+      const ctx = Audio.ctx;
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 700;
+      o.type = 'triangle';
+      o.frequency.value = midiHz(midi);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vel, t + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(lp).connect(g).connect(bus);
+      o.start(t);
+      o.stop(t + dur + 0.05);
+    },
+    // Soft orchestral timpani.
+    timpani(bus, midi, t, dur, vel) {
+      const ctx = Audio.ctx;
+      const f = midiHz(midi);
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(f * 1.6, t);
+      o.frequency.exponentialRampToValueAtTime(f, t + 0.08);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vel, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g).connect(bus);
+      o.start(t);
+      o.stop(t + dur + 0.05);
+      const n = ctx.createBufferSource();
+      n.buffer = Audio.noise;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'lowpass';
+      bp.frequency.value = 400;
+      const ng = ctx.createGain();
+      ng.gain.setValueAtTime(vel * 0.5, t);
+      ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+      n.connect(bp).connect(ng).connect(bus);
+      n.start(t);
+      n.stop(t + 0.2);
+    },
+    // Tiny wooden tick for menus.
+    wood(bus, midi, t, dur, vel) {
+      const ctx = Audio.ctx;
+      const n = ctx.createBufferSource();
+      n.buffer = Audio.noise;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = midiHz(midi);
+      bp.Q.value = 8;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(vel, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      n.connect(bp).connect(g).connect(bus);
+      n.start(t);
+      n.stop(t + dur + 0.02);
+    },
+  };
+
+  // ---------- Sound effects ----------
+  // Notes stay inside C major so effects blend with the background music.
+  const PENTA = [0, 2, 4, 7, 9]; // C D E G A
+  const Sound = {
+    enabled: true,
+    ensure() { Audio.unlock(); return Audio.ctx; },
+    play(fn) {
+      if (!this.enabled) return;
       const ctx = this.ensure();
       if (!ctx) return;
-      const t0 = ctx.currentTime + when;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = type;
-      osc.frequency.setValueAtTime(freq, t0);
-      gain.gain.setValueAtTime(0.0001, t0);
-      gain.gain.exponentialRampToValueAtTime(vol, t0 + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-      osc.connect(gain).connect(ctx.destination);
-      osc.start(t0);
-      osc.stop(t0 + dur + 0.05);
+      try { fn(ctx.currentTime + 0.01, Audio.sfx); } catch (e) { /* ignore */ }
     },
-    hop() { this.tone(520, 0.06, 'triangle', 0.05); },
-    coin() { this.tone(988, 0.08, 'square', 0.05); this.tone(1319, 0.18, 'square', 0.05, 0.07); },
-    putBack() { this.tone(660, 0.08, 'triangle', 0.08); this.tone(440, 0.12, 'triangle', 0.08, 0.07); },
-    nope() { this.tone(220, 0.12, 'triangle', 0.1); this.tone(196, 0.18, 'triangle', 0.1, 0.12); },
-    bonk() { this.tone(150, 0.25, 'sawtooth', 0.08); this.tone(110, 0.3, 'sine', 0.12, 0.05); },
-    open() { [523, 659, 784].forEach((f, i) => this.tone(f, 0.16, 'triangle', 0.1, i * 0.09)); },
-    win() { [523, 659, 784, 1047, 1319].forEach((f, i) => this.tone(f, 0.22, 'triangle', 0.1, i * 0.1)); },
-    click() { this.tone(880, 0.04, 'triangle', 0.05); },
-    star() { this.tone(1568, 0.12, 'sine', 0.08); this.tone(2093, 0.2, 'sine', 0.06, 0.08); },
+    // Hopping walks up a pentatonic scale: the higher up the board, the higher the note.
+    hop(height = 0, sideways = false) {
+      const note = 60 + PENTA[height % 5] + 12 * Math.floor(height / 5);
+      this.play((t, b) => Inst.harp(b, note, t, 0.35, sideways ? 0.09 : 0.14));
+    },
+    // Coin chime: bigger coins ring higher, with a sparkle a fifth above.
+    coin(value = 1) {
+      const base = { 1: 76, 5: 79, 10: 81, 25: 84, 100: 88, 500: 91 }[value] || 79;
+      this.play((t, b) => {
+        Inst.bell(b, base, t, 1.2, 0.22);
+        Inst.bell(b, base + 7, t + 0.09, 1.0, 0.14);
+      });
+    },
+    putBack() {
+      this.play((t, b) => [79, 76, 72].forEach((m, i) => Inst.harp(b, m, t + i * 0.07, 0.5, 0.12)));
+    },
+    // Gentle "hmm" — two low harp notes stepping down.
+    nope() {
+      this.play((t, b) => { Inst.harp(b, 55, t, 0.6, 0.16); Inst.harp(b, 54, t + 0.16, 0.8, 0.14); });
+    },
+    bonk() {
+      this.play((t, b) => { Inst.timpani(b, 43, t, 0.9, 0.35); Inst.harp(b, 48, t + 0.05, 0.6, 0.1); });
+    },
+    // Gate opens: a rising harp glissando over two octaves of C major.
+    open() {
+      const notes = [60, 64, 67, 72, 76, 79, 84, 88];
+      this.play((t, b) => notes.forEach((m, i) => Inst.harp(b, m, t + i * 0.055, 1.4, 0.13)));
+    },
+    // Level complete: the "Ode to Joy" theme (Beethoven) on music box, with harp chords.
+    win() {
+      const tune = [76, 76, 77, 79, 79, 77, 76, 74, 72, 72, 74, 76, 74, 72, 72];
+      const lens = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.5, 0.5, 2];
+      const beat = 0.26;
+      Music.duck(tune.length * beat + 2.5);
+      this.play((t, b) => {
+        let at = t;
+        tune.forEach((m, i) => { Inst.bell(b, m, at, 1.0, 0.2); at += lens[i] * beat; });
+        [[48, 0], [43, 4], [48, 8], [43, 12], [48, 14.5]].forEach(([m, beatAt]) => {
+          Inst.bass(b, m, t + beatAt * beat, 1.2, 0.18);
+          Inst.harp(b, m + 16, t + beatAt * beat, 1.0, 0.07);
+        });
+      });
+    },
+    click() { this.play((t, b) => Inst.wood(b, 84, t, 0.05, 0.35)); },
+    star() { this.play((t, b) => { Inst.bell(b, 84, t, 1.2, 0.18); Inst.bell(b, 91, t + 0.1, 1.2, 0.12); Inst.bell(b, 96, t + 0.2, 1.4, 0.1); }); },
+    // Quiz answers: a V–I cadence for right, a soft unresolved sigh for wrong.
+    correct() {
+      this.play((t, b) => {
+        [67, 71, 74].forEach((m) => Inst.harp(b, m, t, 0.8, 0.09));
+        [72, 76, 79, 84].forEach((m) => Inst.harp(b, m, t + 0.28, 1.6, 0.1));
+        Inst.bell(b, 88, t + 0.3, 1.4, 0.14);
+      });
+    },
+    wrong() {
+      this.play((t, b) => { Inst.harp(b, 64, t, 0.8, 0.12); Inst.harp(b, 62, t + 0.22, 1.2, 0.1); });
+    },
   };
+
+  // ---------- Background music (public-domain classical pieces, arranged for soft harp) ----------
+  function buildPrelude() {
+    // J.S. Bach — Prelude in C major, BWV 846 (first 24 bars; bar 24's G7 leads back to bar 1).
+    const bars = [
+      [60, 64, 67, 72, 76], [60, 62, 69, 74, 77], [59, 62, 67, 74, 77], [60, 64, 67, 72, 76],
+      [60, 64, 69, 76, 81], [60, 62, 66, 69, 74], [59, 62, 67, 74, 79], [59, 60, 64, 67, 72],
+      [57, 60, 64, 67, 72], [50, 57, 62, 66, 72], [55, 59, 62, 67, 71], [55, 58, 64, 67, 73],
+      [53, 57, 62, 69, 74], [53, 56, 62, 65, 71], [52, 55, 60, 67, 72], [52, 53, 57, 60, 65],
+      [50, 53, 57, 60, 65], [43, 50, 55, 59, 65], [48, 52, 55, 60, 64], [48, 55, 58, 60, 64],
+      [41, 53, 57, 60, 64], [42, 48, 57, 60, 63], [44, 53, 59, 60, 62], [43, 53, 55, 59, 62],
+    ];
+    const step = 0.21; // one sixteenth note — slow and calm
+    const ev = [];
+    bars.forEach((n, bi) => {
+      for (let half = 0; half < 2; half++) {
+        const t0 = (bi * 16 + half * 8) * step;
+        ev.push({ t: t0, m: n[0], d: step * 8, v: 0.13, i: 'bass' });
+        ev.push({ t: t0 + step, m: n[1], d: step * 7, v: 0.07, i: 'harp' });
+        [n[2], n[3], n[4], n[2], n[3], n[4]].forEach((m, k) => ev.push({ t: t0 + (k + 2) * step, m, d: 1.6, v: 0.085, i: 'harp' }));
+      }
+    });
+    return { events: ev, length: bars.length * 16 * step };
+  }
+
+  function buildTwinkle() {
+    // W.A. Mozart — theme of "Ah vous dirai-je, Maman" (K. 265), music box over an Alberti bass.
+    const q = 0.5;
+    const melody = [
+      72, 72, 79, 79, 81, 81, 79, null, 77, 77, 76, 76, 74, 74, 72, null,
+      79, 79, 77, 77, 76, 76, 74, null, 79, 79, 77, 77, 76, 76, 74, null,
+      72, 72, 79, 79, 81, 81, 79, null, 77, 77, 76, 76, 74, 74, 72, null,
+    ];
+    const C = [48, 55, 52, 55], F = [53, 60, 57, 60], G = [55, 62, 59, 62], G7 = [43, 53, 50, 53];
+    const halves = [C, C, F, C, F, C, G, C, C, G7, C, G, C, G7, C, G, C, C, F, C, F, C, G, C];
+    const ev = [];
+    melody.forEach((m, i) => {
+      if (m === null) return;
+      const held = melody[i + 1] === null;
+      ev.push({ t: i * q, m, d: held ? 1.8 : 1.1, v: 0.12, i: 'bell' });
+    });
+    halves.forEach((ch, h) => ch.forEach((m, k) => ev.push({ t: h * 2 * q + k * (q / 2), m, d: 0.7, v: 0.06, i: 'harp' })));
+    return { events: ev, length: melody.length * q + q * 2 };
+  }
+
+  const SONGS = { prelude: buildPrelude, twinkle: buildTwinkle };
+
+  const Music = {
+    enabled: true,
+    level: 0.65,
+    wanted: null,
+    song: null,
+    timer: null,
+    play(name) {
+      this.wanted = name;
+      if (this.song && this.song.name === name) return;
+      this._stopNow();
+      this._startIfWanted();
+    },
+    stop() { this.wanted = null; this._stopNow(); },
+    setEnabled(on) {
+      this.enabled = on;
+      if (!on) this._stopNow();
+      else this._startIfWanted();
+    },
+    duck(seconds) {
+      if (!Audio.ctx || !this.song) return;
+      const g = Audio.music.gain;
+      const t = Audio.ctx.currentTime;
+      g.cancelScheduledValues(t);
+      g.setValueAtTime(g.value, t);
+      g.linearRampToValueAtTime(this.level * 0.25, t + 0.3);
+      g.setValueAtTime(this.level * 0.25, t + seconds);
+      g.linearRampToValueAtTime(this.level, t + seconds + 1.5);
+    },
+    _startIfWanted() {
+      if (!this.enabled || !this.wanted || this.song || !Audio.unlocked || !Audio.ctx) return;
+      const built = SONGS[this.wanted]();
+      const ctx = Audio.ctx;
+      this.song = { name: this.wanted, ...built, idx: 0, start: ctx.currentTime + 0.3 };
+      const g = Audio.music.gain;
+      g.cancelScheduledValues(ctx.currentTime);
+      g.setValueAtTime(0, ctx.currentTime);
+      g.linearRampToValueAtTime(this.level, ctx.currentTime + 3);
+      this.timer = setInterval(() => this._schedule(), 60);
+      this._schedule();
+    },
+    _schedule() {
+      const s = this.song;
+      const ctx = Audio.ctx;
+      if (!s || !ctx || ctx.state !== 'running') return;
+      const horizon = ctx.currentTime + 0.35;
+      let guard = 0;
+      while (guard++ < 200) {
+        const e = s.events[s.idx];
+        const at = s.start + e.t;
+        if (at > horizon) break;
+        if (at >= ctx.currentTime - 0.05) Inst[e.i](Audio.music, e.m, at, e.d, e.v);
+        s.idx++;
+        if (s.idx >= s.events.length) { s.idx = 0; s.start += s.length; }
+      }
+    },
+    _stopNow() {
+      clearInterval(this.timer);
+      this.timer = null;
+      if (this.song && Audio.ctx) {
+        const g = Audio.music.gain;
+        const t = Audio.ctx.currentTime;
+        g.cancelScheduledValues(t);
+        g.setValueAtTime(g.value, t);
+        g.linearRampToValueAtTime(0, t + 0.4);
+      }
+      this.song = null;
+    },
+  };
+
+  // Browsers only allow sound after the first key press or click.
+  ['keydown', 'pointerdown'].forEach((type) => window.addEventListener(type, () => Audio.unlock(), { capture: true }));
+  document.addEventListener('visibilitychange', () => {
+    if (!Audio.ctx) return;
+    if (document.hidden) Audio.ctx.suspend();
+    else Audio.ctx.resume();
+  });
 
   // ---------- Read aloud (helps early readers) ----------
   const Voice = {
@@ -160,6 +488,7 @@
   function applySettings(settings) {
     Sound.enabled = !!settings.sound;
     Voice.enabled = !!settings.voice;
+    Music.setEnabled(settings.music !== false);
   }
 
   // ---------- Money formatting ----------
@@ -240,7 +569,7 @@
 
   window.MQ = {
     HEROES, load, save, exportFile, importText, reset, unlockedHeroes,
-    Sound, Voice, applySettings,
+    Audio, Sound, Music, Voice, applySettings,
     cents, dollars, money, moneyWords, zhNumber, zhMoney,
     PRAISE, CHEER, pick, escapeHtml,
   };
