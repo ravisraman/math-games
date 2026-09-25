@@ -63,7 +63,8 @@
 
     // How amounts are written: cents first, then dollars, then mixed so he has to convert.
     c.format = L <= 7 ? 'cents' : L <= 9 ? 'dollars' : 'mixed';
-    c.roads = Math.min(2 + Math.floor((L - 1) / 2), 5);
+    c.roads = Math.min(2 + Math.floor((L - 1) / 3), 5);
+    c.maxRun = L < 10 ? 2 : 3; // longest stretch of back-to-back roads
     c.speed = Math.min(1.0 + 0.12 * (L - 1), 3.4);
     c.maxCars = L <= 2 ? 2 : L <= 11 ? 3 : 4;
     c.buses = L >= 5;
@@ -143,8 +144,19 @@
     }
 
     // Lanes: row 0 is the castle, the bottom row is the safe start, some middle rows are roads.
-    const middle = shuffle(Array.from({ length: ROWS - 2 }, (_, i) => i + 1));
-    const roadRows = new Set(middle.slice(0, cfg.roads));
+    // Roads come in short groups with safe grass rows between them.
+    let roadRows;
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const middle = shuffle(Array.from({ length: ROWS - 2 }, (_, i) => i + 1));
+      roadRows = new Set(middle.slice(0, cfg.roads));
+      let run = 0;
+      let ok = true;
+      for (let r = 1; r <= ROWS - 2; r++) {
+        run = roadRows.has(r) ? run + 1 : 0;
+        if (run > cfg.maxRun) { ok = false; break; }
+      }
+      if (ok) break;
+    }
     lanes = [];
     laneByRow = {};
     for (const row of roadRows) {
@@ -163,7 +175,9 @@
       v, r: cells[i].r, c: cells[i].c, taken: false, warned: false, bob: Math.random() * 6, fly: null,
     }));
 
-    player = { r: START_ROW, c: START_COL, fromR: START_ROW, fromC: START_COL, t: 1, inv: 0 };
+    player = { r: START_ROW, c: START_COL, fromR: START_ROW, fromC: START_COL, t: 1, inv: 0, land: 0 };
+    bgSeed = Math.floor(Math.random() * 1e9);
+    bgCanvas = null;
     pouch = [];
     stats = { overshoots: 0, bonks: 0, putBacks: 0, seconds: 0 };
     needRevealed = cfg.showNeed;
@@ -267,6 +281,11 @@
   }
 
   function onLand() {
+    player.land = 0.16;
+    const pos = cellCenter(player.r, player.c);
+    for (let i = 0; i < 6; i++) {
+      particles.push({ x: pos.x + (Math.random() - 0.5) * 20, y: pos.y + 20, vx: (Math.random() - 0.5) * 60, vy: -20 - Math.random() * 30, life: 0.4, color: 'rgba(255,255,255,0.8)', size: 3 + Math.random() * 3, dust: true });
+    }
     if (player.r === BANK_ROW) { win(); return; }
     const coin = coins.find((c) => !c.taken && !c.fly && c.r === player.r && c.c === player.c);
     if (coin) touchCoin(coin);
@@ -637,6 +656,7 @@
       (k) => { if (k === 'Enter' || k === ' ') startPlay(); }
     );
     MQ.Voice.say(`Level ${g.level}. Collect exactly ${MQ.moneyWords(target)}.`, 'en-US', { interrupt: true });
+    if (first) MQ.Voice.say('Hop with the arrow keys. Watch out for the cars! When you have exactly the right money, hop into the castle.', 'en-US');
     if (data.settings.chinese) MQ.Voice.say(MQ.zhMoney(target), 'zh-CN');
     say(`Collect exactly ${MQ.money(target, targetFmt)}!`);
   }
@@ -711,6 +731,7 @@
         if (player.t === 1) onLand();
       }
       if (player.inv > 0) player.inv -= dt;
+      if (player.land > 0) player.land -= dt;
       const lane = laneByRow[player.r];
       if (lane && player.inv <= 0 && state === 'play') {
         const x0 = player.c + 0.22;
@@ -719,52 +740,169 @@
       }
     }
 
-    for (const p of particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 400 * dt; p.life -= dt; }
+    for (const p of particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += (p.dust ? 40 : 400) * dt; p.life -= dt; }
     particles = particles.filter((p) => p.life > 0);
     for (const f of floaters) { f.y -= 40 * dt; f.life -= dt; }
     floaters = floaters.filter((f) => f.life > 0);
   }
 
   // ---------- Drawing ----------
-  function roundRect(x, y, w, h, r) {
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r);
-    ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r);
-    ctx.arcTo(x, y, x + w, y, r);
-    ctx.closePath();
+  function roundRect(x, y, w, h, r, c = ctx) {
+    c.beginPath();
+    c.moveTo(x + r, y);
+    c.arcTo(x + w, y, x + w, y + h, r);
+    c.arcTo(x + w, y + h, x, y + h, r);
+    c.arcTo(x, y + h, x, y, r);
+    c.arcTo(x, y, x + w, y, r);
+    c.closePath();
   }
 
-  function drawRows() {
-    for (let r = 0; r < ROWS; r++) {
+  function seeded(seed) {
+    let a = seed >>> 0;
+    return () => {
+      a = (a + 0x6d2b79f5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function shade(hex, amt) {
+    const n = parseInt(hex.slice(1), 16);
+    const f = (v) => Math.max(0, Math.min(255, Math.round(v + amt * 255)));
+    return `rgb(${f(n >> 16)},${f((n >> 8) & 255)},${f(n & 255)})`;
+  }
+
+  // The ground (grass, roads, curbs, flowers) is painted once per level onto an offscreen canvas.
+  let bgCanvas = null;
+  let bgSeed = 1;
+
+  function buildBackground() {
+    bgCanvas = document.createElement('canvas');
+    bgCanvas.width = Math.max(1, Math.round(W * pixelScale));
+    bgCanvas.height = Math.max(1, Math.round(H * pixelScale));
+    const b = bgCanvas.getContext('2d');
+    b.setTransform(pixelScale, 0, 0, pixelScale, 0, 0);
+    const rnd = seeded(bgSeed);
+    const isRoad = (r) => !!laneByRow[r];
+
+    for (let r = 1; r < ROWS; r++) {
       const y = rowTop(r);
-      if (r === BANK_ROW) continue;
-      if (laneByRow[r]) {
-        ctx.fillStyle = '#585e66';
-        ctx.fillRect(0, y, W, CELL);
-        ctx.fillStyle = '#6b727b';
-        ctx.fillRect(0, y, W, 3);
-        ctx.fillRect(0, y + CELL - 3, W, 3);
-        if (laneByRow[r + 1]) {
-          ctx.fillStyle = 'rgba(255,255,255,0.7)';
-          for (let x = 8; x < W; x += 48) ctx.fillRect(x, y + CELL - 2, 26, 4);
+      if (isRoad(r)) {
+        const asphalt = b.createLinearGradient(0, y, 0, y + CELL);
+        asphalt.addColorStop(0, '#5d636c'); asphalt.addColorStop(1, '#4f555d');
+        b.fillStyle = asphalt;
+        b.fillRect(0, y, W, CELL);
+        for (let i = 0; i < 260; i++) {
+          b.fillStyle = rnd() < 0.5 ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.10)';
+          b.fillRect(rnd() * W, y + rnd() * CELL, 1.5, 1.5);
+        }
+        // Stone curbs where the road meets grass
+        for (const [edge, yy] of [[r - 1, y], [r + 1, y + CELL - 6]]) {
+          if (isRoad(edge) || edge === BANK_ROW) continue;
+          b.fillStyle = '#c9c2b3';
+          b.fillRect(0, yy, W, 6);
+          b.fillStyle = 'rgba(0,0,0,0.12)';
+          for (let x = 0; x < W; x += 24) b.fillRect(x, yy, 2, 6);
+        }
+        if (isRoad(r + 1)) {
+          b.fillStyle = 'rgba(255,245,200,0.75)';
+          for (let x = 10; x < W; x += 52) { roundRect(x, y + CELL - 2.5, 28, 5, 2.5, b); b.fill(); }
         }
       } else {
-        const base = r === START_ROW ? ['#a6e38a', '#9bdc7d'] : r % 2 ? ['#7fd160', '#77c958'] : ['#86d767', '#7ecf5f'];
+        const start = r === START_ROW;
+        const base = start ? ['#a9e38d', '#a0dc83'] : r % 2 ? ['#83d464', '#7bcb5c'] : ['#8bda6b', '#83d263'];
         for (let c = 0; c < COLS; c++) {
-          ctx.fillStyle = base[(c + r) % 2];
-          ctx.fillRect(c * CELL, y, CELL, CELL);
+          b.fillStyle = base[(c + r) % 2];
+          b.fillRect(c * CELL, y, CELL, CELL);
         }
-        if (r === START_ROW) {
-          ctx.font = `20px ${EMOJI_FONT}`;
-          ctx.fillStyle = '#000';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          for (const c of [0, 2, 4, 8, 10, 12]) ctx.fillText('🌼', c * CELL + 32, y + 32);
+        // Soft light from the top of each grass band
+        const sheen = b.createLinearGradient(0, y, 0, y + CELL);
+        sheen.addColorStop(0, 'rgba(255,255,255,0.10)'); sheen.addColorStop(1, 'rgba(0,0,0,0.04)');
+        b.fillStyle = sheen;
+        b.fillRect(0, y, W, CELL);
+        // Grass tufts, tiny flowers and pebbles
+        for (let c = 0; c < COLS; c++) {
+          const tufts = 2 + Math.floor(rnd() * 3);
+          for (let k = 0; k < tufts; k++) {
+            const tx = c * CELL + 6 + rnd() * (CELL - 12);
+            const ty = y + 8 + rnd() * (CELL - 14);
+            b.strokeStyle = start ? 'rgba(70,140,50,0.45)' : 'rgba(60,130,40,0.5)';
+            b.lineWidth = 1.6;
+            b.lineCap = 'round';
+            for (const dx of [-3, 0, 3]) { b.beginPath(); b.moveTo(tx + dx * 0.4, ty + 5); b.quadraticCurveTo(tx + dx, ty + 1, tx + dx * 1.3, ty - 2); b.stroke(); }
+          }
+          const roll = rnd();
+          if (roll < 0.14) {
+            const fx = c * CELL + 10 + rnd() * (CELL - 20);
+            const fy = y + 10 + rnd() * (CELL - 20);
+            const petal = ['#ffffff', '#ffd6e8', '#fff3a3', '#d9c8ff'][Math.floor(rnd() * 4)];
+            b.fillStyle = petal;
+            for (let a = 0; a < 5; a++) { b.beginPath(); b.arc(fx + Math.cos(a * 1.257) * 3, fy + Math.sin(a * 1.257) * 3, 2.4, 0, Math.PI * 2); b.fill(); }
+            b.fillStyle = '#ffb703';
+            b.beginPath(); b.arc(fx, fy, 1.8, 0, Math.PI * 2); b.fill();
+          } else if (roll < 0.2) {
+            b.fillStyle = 'rgba(120,110,95,0.35)';
+            b.beginPath(); b.ellipse(c * CELL + 12 + rnd() * 40, y + 14 + rnd() * 36, 3.5, 2.5, 0, 0, Math.PI * 2); b.fill();
+          }
+        }
+        // Shadow cast onto the grass by a curb just above
+        if (isRoad(r - 1)) {
+          const sh = b.createLinearGradient(0, y, 0, y + 10);
+          sh.addColorStop(0, 'rgba(0,0,0,0.14)'); sh.addColorStop(1, 'rgba(0,0,0,0)');
+          b.fillStyle = sh;
+          b.fillRect(0, y, W, 10);
+        }
+        if (start) {
+          // A little stone pad where the hero starts
+          b.fillStyle = 'rgba(255,255,255,0.35)';
+          roundRect(START_COL * CELL + 6, y + 6, CELL - 12, CELL - 12, 12, b); b.fill();
+          b.strokeStyle = 'rgba(120,100,70,0.25)'; b.lineWidth = 2; b.stroke();
+          b.font = `20px ${EMOJI_FONT}`;
+          b.fillStyle = '#000';
+          b.textAlign = 'center'; b.textBaseline = 'middle';
+          for (const c of [0, 2, 4, 8, 10, 12]) b.fillText(c % 4 === 0 ? '🌷' : '🌼', c * CELL + 32, y + 34);
         }
       }
     }
+  }
+
+  function drawRows() {
+    if (!bgCanvas) buildBackground();
+    ctx.drawImage(bgCanvas, 0, 0, W, H);
+  }
+
+  // Slow cloud shadows and a couple of butterflies keep the scene gently alive.
+  const clouds = [0, 1, 2].map((i) => ({ x: i * 320 + Math.random() * 100, y: 220 + i * 170, s: 0.8 + Math.random() * 0.6 }));
+  const butterflies = [0, 1].map((i) => ({ x: Math.random() * W, y: 240 + Math.random() * 300, phase: Math.random() * 6, dir: i ? 1 : -1 }));
+
+  function drawAmbient(dt) {
+    for (const cl of clouds) {
+      cl.x += 8 * dt;
+      if (cl.x > W + 200) cl.x = -200;
+      ctx.fillStyle = 'rgba(20,40,60,0.07)';
+      ctx.beginPath();
+      ctx.ellipse(cl.x, cl.y, 110 * cl.s, 34 * cl.s, 0, 0, Math.PI * 2);
+      ctx.ellipse(cl.x + 60 * cl.s, cl.y - 14 * cl.s, 70 * cl.s, 28 * cl.s, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.font = `18px ${EMOJI_FONT}`;
+    ctx.fillStyle = '#000';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const bf of butterflies) {
+      bf.x += bf.dir * 18 * dt;
+      if (bf.x > W + 30) bf.x = -30;
+      if (bf.x < -30) bf.x = W + 30;
+      const flap = 0.6 + 0.4 * Math.abs(Math.sin(time * 9 + bf.phase));
+      ctx.save();
+      ctx.translate(bf.x, bf.y + Math.sin(time * 1.3 + bf.phase) * 30);
+      ctx.scale(flap * bf.dir, 1);
+      ctx.globalAlpha = 0.85;
+      ctx.fillText('🦋', 0, 0);
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
   }
 
   function bricks(x, y, w, h, color, mortar) {
@@ -899,31 +1037,63 @@
     }
   }
 
-  function drawCoin(v, x, y, scale = 1) {
+  function drawCoin(v, x, y, scale = 1, seed = 0) {
     const k = COINS[v];
     ctx.save();
     ctx.translate(x, y);
     ctx.scale(scale, scale);
     ctx.fillStyle = 'rgba(0,0,0,0.18)';
-    ctx.beginPath(); ctx.ellipse(0, 22, 18, 5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0, 22, 17, 5, 0, 0, Math.PI * 2); ctx.fill();
     if (k.bill) {
-      roundRect(-24, -14, 48, 28, 5);
-      ctx.fillStyle = k.fill; ctx.fill();
-      ctx.lineWidth = 3; ctx.strokeStyle = k.edge; ctx.stroke();
+      ctx.rotate(-0.06);
+      roundRect(-25, -15, 50, 30, 5);
+      const paper = ctx.createLinearGradient(0, -15, 0, 15);
+      paper.addColorStop(0, shade(k.fill, 0.08)); paper.addColorStop(1, shade(k.fill, -0.06));
+      ctx.fillStyle = paper; ctx.fill();
+      ctx.lineWidth = 2.5; ctx.strokeStyle = k.edge; ctx.stroke();
+      roundRect(-20, -10, 40, 20, 3);
+      ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      ctx.beginPath(); ctx.ellipse(0, 0, 9, 8, 0, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = k.text;
-      ctx.font = `900 16px ${UI_FONT}`;
+      ctx.font = `900 15px ${UI_FONT}`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(`$${v / 100}`, 0, 1);
     } else {
-      const g2 = ctx.createRadialGradient(-k.r * 0.35, -k.r * 0.4, 2, 0, 0, k.r);
-      g2.addColorStop(0, k.hi); g2.addColorStop(0.6, k.mid); g2.addColorStop(1, k.lo);
-      ctx.fillStyle = g2;
+      // Rim, face gradient, ridges on dimes & quarters, and a soft highlight
+      ctx.fillStyle = k.lo;
+      ctx.beginPath(); ctx.arc(0, 1.5, k.r, 0, Math.PI * 2); ctx.fill();
+      const face = ctx.createRadialGradient(-k.r * 0.35, -k.r * 0.45, 1, 0, 0, k.r);
+      face.addColorStop(0, k.hi); face.addColorStop(0.55, k.mid); face.addColorStop(1, k.lo);
+      ctx.fillStyle = face;
       ctx.beginPath(); ctx.arc(0, 0, k.r, 0, Math.PI * 2); ctx.fill();
-      ctx.lineWidth = 2; ctx.strokeStyle = k.lo; ctx.stroke();
+      ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+      ctx.beginPath(); ctx.arc(0, 0, k.r - 3, 0, Math.PI * 2); ctx.stroke();
+      if (v === 10 || v === 25) {
+        ctx.strokeStyle = 'rgba(0,0,0,0.18)'; ctx.lineWidth = 1;
+        for (let a = 0; a < Math.PI * 2; a += 0.22) {
+          ctx.beginPath(); ctx.moveTo(Math.cos(a) * (k.r - 1.5), Math.sin(a) * (k.r - 1.5)); ctx.lineTo(Math.cos(a) * k.r, Math.sin(a) * k.r); ctx.stroke();
+        }
+      }
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.beginPath(); ctx.ellipse(-k.r * 0.35, -k.r * 0.45, k.r * 0.35, k.r * 0.18, -0.6, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = k.text;
       ctx.font = `900 ${v >= 10 ? 12 : 13}px ${UI_FONT}`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(`${v}¢`, 0, 1);
+    }
+    // Occasional twinkle
+    const tw = Math.sin(time * 1.7 + seed * 3.1);
+    if (tw > 0.93) {
+      const a = (tw - 0.93) / 0.07;
+      ctx.globalAlpha = a;
+      ctx.fillStyle = '#fff';
+      const sx = 10, sy = -12, L = 8 * a + 2;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy - L); ctx.lineTo(sx + 2, sy - 2); ctx.lineTo(sx + L, sy); ctx.lineTo(sx + 2, sy + 2);
+      ctx.lineTo(sx, sy + L); ctx.lineTo(sx - 2, sy + 2); ctx.lineTo(sx - L, sy); ctx.lineTo(sx - 2, sy - 2); ctx.closePath();
+      ctx.fill();
+      ctx.globalAlpha = 1;
     }
     ctx.restore();
   }
@@ -934,41 +1104,82 @@
       const home = cellCenter(c.r, c.c);
       if (c.fly) {
         const t = ease(c.fly.t);
-        drawCoin(c.v, lerp(c.fly.x, home.x, t), lerp(c.fly.y, home.y, t) - Math.sin(Math.PI * t) * 50, 1);
+        drawCoin(c.v, lerp(c.fly.x, home.x, t), lerp(c.fly.y, home.y, t) - Math.sin(Math.PI * t) * 50, 1, c.bob);
       } else {
-        drawCoin(c.v, home.x, home.y + Math.sin(time * 3 + c.bob) * 3, 1);
+        drawCoin(c.v, home.x, home.y + Math.sin(time * 3 + c.bob) * 3, 1, c.bob);
       }
     }
   }
 
-  function drawCars() {
-    for (const lane of lanes) {
-      const y = rowTop(lane.row);
-      for (const car of lane.cars) {
-        const x = car.x * CELL + 4;
-        const w = car.len * CELL - 8;
-        ctx.fillStyle = 'rgba(0,0,0,0.25)';
-        roundRect(x + 3, y + 14, w, 42, 10); ctx.fill();
-        ctx.fillStyle = car.color;
-        roundRect(x, y + 10, w, 40, 10); ctx.fill();
-        // Roof + windows
-        ctx.fillStyle = 'rgba(255,255,255,0.85)';
-        if (car.len === 1) {
-          roundRect(x + w * 0.22, y + 16, w * 0.56, 28, 6); ctx.fill();
-          ctx.fillStyle = car.color;
-          ctx.fillRect(x + w * 0.48, y + 16, 4, 28);
-        } else {
-          for (let i = 0; i < 4; i++) { roundRect(x + 12 + i * (w - 24) / 4, y + 17, (w - 24) / 4 - 6, 22, 4); ctx.fill(); }
-        }
-        // Wheels
-        ctx.fillStyle = '#222';
-        for (const wx of [x + 10, x + w - 22]) { ctx.fillRect(wx, y + 6, 12, 6); ctx.fillRect(wx, y + 48, 12, 6); }
-        // Headlights on the front
-        ctx.fillStyle = '#fff59d';
-        const fx = lane.dir > 0 ? x + w - 6 : x + 2;
-        ctx.fillRect(fx, y + 14, 4, 8); ctx.fillRect(fx, y + 38, 4, 8);
-      }
+  // Top-down cars: glossy body, glass cabin, wheels, headlight beams. Long vehicles are buses.
+  function drawCar(car, lane) {
+    const y = rowTop(lane.row);
+    const x = car.x * CELL + 5;
+    const w = car.len * CELL - 10;
+    const front = lane.dir > 0 ? x + w : x;
+    const fwd = lane.dir;
+    const bus = car.len > 1;
+    const color = bus ? '#ffc93c' : car.color;
+
+    // Headlight beams
+    const beam = ctx.createLinearGradient(front, 0, front + fwd * 34, 0);
+    beam.addColorStop(0, 'rgba(255,245,170,0.35)'); beam.addColorStop(1, 'rgba(255,245,170,0)');
+    ctx.fillStyle = beam;
+    for (const by of [y + 20, y + 44]) {
+      ctx.beginPath(); ctx.moveTo(front, by - 3); ctx.lineTo(front + fwd * 34, by - 9); ctx.lineTo(front + fwd * 34, by + 9); ctx.lineTo(front, by + 3); ctx.closePath(); ctx.fill();
     }
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+    roundRect(x + 3, y + 13, w, 44, 12); ctx.fill();
+    // Wheels peek out on both sides
+    ctx.fillStyle = '#23262b';
+    for (const wx of bus ? [x + 12, x + w / 2 - 6, x + w - 26] : [x + 9, x + w - 23]) {
+      roundRect(wx, y + 6, 14, 8, 3); ctx.fill();
+      roundRect(wx, y + 50, 14, 8, 3); ctx.fill();
+    }
+    // Body
+    const body = ctx.createLinearGradient(0, y + 10, 0, y + 54);
+    body.addColorStop(0, shade(color, 0.18)); body.addColorStop(0.5, color); body.addColorStop(1, shade(color, -0.18));
+    ctx.fillStyle = body;
+    roundRect(x, y + 10, w, 44, 13); ctx.fill();
+    ctx.strokeStyle = shade(color, -0.3); ctx.lineWidth = 1.5; ctx.stroke();
+
+    const glass = ctx.createLinearGradient(0, y + 16, 0, y + 48);
+    glass.addColorStop(0, '#d9f1ff'); glass.addColorStop(1, '#7fb3d6');
+    if (bus) {
+      ctx.fillStyle = shade(color, 0.12);
+      roundRect(x + 8, y + 15, w - 16, 34, 8); ctx.fill();
+      ctx.fillStyle = glass;
+      const n = 5;
+      const ww = (w - 30) / n;
+      for (let i = 0; i < n; i++) { roundRect(x + 15 + i * ww, y + 18, ww - 5, 9, 3); ctx.fill(); roundRect(x + 15 + i * ww, y + 37, ww - 5, 9, 3); ctx.fill(); }
+      ctx.fillStyle = '#2b2b2b';
+      ctx.fillRect(x + 12, y + 30, w - 24, 3);
+    } else {
+      // Windshield toward the front, rear window toward the back, roof in between
+      const wsx = fwd > 0 ? x + w * 0.56 : x + w * 0.14;
+      const rwx = fwd > 0 ? x + w * 0.16 : x + w * 0.66;
+      ctx.fillStyle = glass;
+      roundRect(wsx, y + 16, w * 0.3, 32, 7); ctx.fill();
+      roundRect(rwx, y + 18, w * 0.18, 28, 6); ctx.fill();
+      ctx.fillStyle = shade(color, 0.08);
+      roundRect(x + w * 0.3, y + 17, w * 0.36, 30, 8); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.28)';
+      roundRect(x + w * 0.33, y + 19, w * 0.3, 6, 3); ctx.fill();
+    }
+    // Head- and tail-lights
+    ctx.fillStyle = '#fff6b0';
+    const hx = fwd > 0 ? x + w - 5 : x + 1;
+    roundRect(hx, y + 15, 4, 8, 2); ctx.fill();
+    roundRect(hx, y + 41, 4, 8, 2); ctx.fill();
+    ctx.fillStyle = '#ff5a5a';
+    const tx = fwd > 0 ? x + 1 : x + w - 5;
+    roundRect(tx, y + 16, 4, 6, 2); ctx.fill();
+    roundRect(tx, y + 42, 4, 6, 2); ctx.fill();
+  }
+
+  function drawCars() {
+    for (const lane of lanes) for (const car of lane.cars) drawCar(car, lane);
   }
 
   function drawPlayer() {
@@ -979,18 +1190,29 @@
     ctx.fillStyle = 'rgba(0,0,0,0.22)';
     ctx.beginPath(); ctx.ellipse(x, yGround + 22, 18 - hop * 0.3, 6, 0, 0, Math.PI * 2); ctx.fill();
     if (player.inv > 0 && Math.floor(player.inv * 10) % 2 === 0) return;
-    ctx.font = `44px ${EMOJI_FONT}`;
+    // Squash on landing, stretch in the air
+    let sx = 1, sy = 1;
+    if (player.t < 1) { sx = 0.94; sy = 1.08; }
+    else if (player.land > 0) { const q = player.land / 0.16; sx = 1 + 0.14 * q; sy = 1 - 0.14 * q; }
+    // Idle breathing
+    const breathe = player.t >= 1 && player.land <= 0 ? 1 + Math.sin(time * 3) * 0.02 : 1;
+    ctx.save();
+    ctx.translate(x, yGround + 16 - hop);
+    ctx.scale(sx, sy * breathe);
+    ctx.font = `46px ${EMOJI_FONT}`;
     ctx.fillStyle = '#000'; // color emoji inherit the fill's opacity
     ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(hero, x, yGround - hop);
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(hero, 0, -2);
+    ctx.restore();
   }
 
   function drawEffects() {
     for (const p of particles) {
       ctx.globalAlpha = Math.max(0, Math.min(1, p.life));
       ctx.fillStyle = p.color;
-      ctx.fillRect(p.x, p.y, p.size, p.size);
+      if (p.dust) { ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill(); }
+      else ctx.fillRect(p.x, p.y, p.size, p.size);
     }
     ctx.globalAlpha = 1;
     ctx.textAlign = 'center';
@@ -1007,13 +1229,14 @@
     ctx.globalAlpha = 1;
   }
 
-  function draw() {
+  function draw(dt) {
     ctx.clearRect(0, 0, W, H);
     drawRows();
     drawCastle();
     drawCoins();
     drawCars();
     drawPlayer();
+    drawAmbient(dt);
     drawEffects();
   }
 
@@ -1033,6 +1256,7 @@
     canvas.height = Math.round(H * scale * dpr);
     pixelScale = scale * dpr;
     ctx.setTransform(pixelScale, 0, 0, pixelScale, 0, 0);
+    bgCanvas = null; // repaint the ground at the new size
   }
   window.addEventListener('resize', resize);
 
@@ -1041,7 +1265,7 @@
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     update(dt);
-    draw();
+    draw(dt);
     requestAnimationFrame(frame);
   }
 

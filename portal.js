@@ -7,18 +7,31 @@
 
   const GAMES = [
     {
-      id: 'coinCrossing', icon: '🪙', name: 'Coin Crossing', href: 'games/coin-crossing/index.html',
+      id: 'coinCrossing', name: 'Coin Crossing', zh: '过马路', href: 'games/coin-crossing/index.html',
+      art: ['🏰', '🪙', '🚗'], theme: 'coins', skill: 'Money',
       what: 'Hop across the roads and collect exactly the right amount of money.',
+      levels: 'Levels 1–2 pennies & nickels · 3–4 dimes · 5–7 quarters · 8–9 dollars · 10+ mixed cents/dollars · 14+ $5 bills.',
     },
-    { id: 'clockTower', icon: '🕰️', name: 'Clock Tower', what: 'Set the clock hands before the bell rings.', soon: true },
-    { id: 'numberFlow', icon: '🔗', name: 'Number Flow', what: 'Connect paths of numbers that add up — like Flow Free.', soon: true },
-    { id: 'castleClimb', icon: '🏯', name: 'Castle Climb', what: 'Add and subtract to climb the tower.', soon: true },
+    {
+      id: 'numberFlow', name: 'Number Flow', zh: '数字连线', href: 'games/number-flow/index.html',
+      art: ['🔵', '➕', '🟢'], theme: 'flow', skill: 'Adding',
+      what: 'Draw paths through numbers that add up to the target — like Flow Free.',
+    },
+    {
+      id: 'clockTower', name: 'Clock Tower', zh: '钟楼', href: 'games/clock-tower/index.html',
+      art: ['🕰️', '🔔', '⭐'], theme: 'clock', skill: 'Time',
+      what: 'Be the clock keeper: read and set the clock, and figure out elapsed time.',
+    },
+    {
+      id: 'castleClimb', name: 'Castle Climb', zh: '爬城堡', href: 'games/castle-climb/index.html',
+      art: ['🏯', '🏮', '🎆'], theme: 'climb', skill: 'Math facts',
+      what: 'Jump to the right answer to climb the tower. Adding and subtracting facts.',
+    },
   ];
 
   const $ = (id) => document.getElementById(id);
 
   function progressText(game) {
-    if (game.soon) return 'Coming soon';
     const g = data.games[game.id];
     if (!g || !g.played) return '▶ New game!';
     return `▶ Level ${g.level}`;
@@ -31,11 +44,16 @@
     $('star-count').textContent = data.stars;
 
     $('games').innerHTML = GAMES.map((g) => `
-      <button class="tile nav ${g.soon ? 'soon' : 'play'}" data-game="${g.id}">
-        <span class="icon">${g.icon}</span>
-        <span class="name">${g.name}</span>
-        <span class="what">${g.what}</span>
-        <span class="progress">${progressText(g)}</span>
+      <button class="tile nav play theme-${g.theme}" data-game="${g.id}">
+        <span class="art" aria-hidden="true">
+          <span class="a1">${g.art[0]}</span><span class="a2">${g.art[1]}</span><span class="a3">${g.art[2]}</span>
+        </span>
+        <span class="body">
+          <span class="tag">${g.skill}</span>
+          <span class="name">${g.name} <span class="zh">${g.zh}</span></span>
+          <span class="what">${g.what}</span>
+          <span class="progress">${progressText(g)}</span>
+        </span>
       </button>`).join('');
 
     $('heroes').innerHTML = MQ.HEROES.map((h) => {
@@ -53,12 +71,7 @@
     if (tile) {
       const game = GAMES.find((g) => g.id === tile.dataset.game);
       MQ.Sound.click();
-      if (game.soon) {
-        MQ.Voice.say(`${game.name} is coming soon!`, 'en-US', { interrupt: true });
-        tile.animate([{ transform: 'translateX(0)' }, { transform: 'translateX(-6px)' }, { transform: 'translateX(6px)' }, { transform: 'translateX(0)' }], { duration: 250 });
-      } else {
-        location.href = game.href;
-      }
+      location.href = game.href;
       return;
     }
     const heroBtn = e.target.closest('[data-hero]');
@@ -105,6 +118,11 @@
     if (document.querySelector('dialog[open]')) return;
     const dirs = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
     if (dirs[e.key]) { e.preventDefault(); move(...dirs[e.key]); }
+    if ((e.key === 'm' || e.key === 'M') && !e.repeat) {
+      data.settings.music = data.settings.music === false;
+      MQ.applySettings(data.settings);
+      MQ.save(data);
+    }
   });
 
   // ---------- First visit: ask for a name ----------
@@ -127,7 +145,7 @@
   }
 
   // ---------- Grown-ups corner ----------
-  const QUIZ_LABELS = {
+  const COIN_QUIZ_LABELS = {
     add: 'Adding', count: 'Counting coins', sub: 'Subtracting', change: 'Making change',
     c2d: 'Cents → dollars', d2c: 'Dollars → cents',
   };
@@ -137,64 +155,70 @@
     return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
   }
 
-  function renderGrownups() {
-    const cc = data.games.coinCrossing || { level: 1, maxLevel: 1, played: 0, history: [], quiz: {} };
-    const hist = (cc.history || []).slice(-10).reverse();
-    const recent = (cc.history || []).slice(-10);
-    const avgStars = recent.length ? (recent.reduce((s, h) => s + h.stars, 0) / recent.length).toFixed(1) : '—';
-    const skills = Object.keys(QUIZ_LABELS).map((k) => {
-      const s = (cc.quiz || {})[k];
-      if (!s || !s.tries) return `<div class="skill"><span>${QUIZ_LABELS[k]}</span><div class="bar"><i style="width:0"></i></div><span class="muted">not yet</span></div>`;
-      const pct = Math.round((100 * s.right) / s.tries);
-      return `<div class="skill"><span>${QUIZ_LABELS[k]}</span><div class="bar"><i style="width:${pct}%"></i></div><span>${s.right}/${s.tries}</span></div>`;
-    }).join('');
+  // Coin Crossing predates the shared history/skills format, so adapt it here.
+  function skillsFor(id, g) {
+    if (id === 'coinCrossing') {
+      return Object.keys(COIN_QUIZ_LABELS).map((k) => ({ label: COIN_QUIZ_LABELS[k], ...((g.quiz || {})[k] || { right: 0, tries: 0 }) }));
+    }
+    return Object.values(g.skills || {});
+  }
 
+  function summaryFor(id, h) {
+    if (h.summary) return h.summary;
+    if (id === 'coinCrossing') return `${h.target < 100 ? MQ.cents(h.target) : MQ.dollars(h.target)} · ${h.overshoots} too-much · ${h.bonks} bumps`;
+    return '';
+  }
+
+  function gameCard(game) {
+    const g = data.games[game.id] || { level: 1, played: 0, history: [] };
+    const hist = (g.history || []).slice(-6).reverse();
+    const recent = (g.history || []).slice(-10);
+    const avgStars = recent.length ? (recent.reduce((s, h) => s + h.stars, 0) / recent.length).toFixed(1) : '—';
+    const skills = skillsFor(game.id, g).map((s) => {
+      if (!s.tries) return `<div class="skill"><span>${MQ.escapeHtml(s.label)}</span><div class="bar"><i style="width:0"></i></div><span class="muted">not yet</span></div>`;
+      const pct = Math.round((100 * s.right) / s.tries);
+      return `<div class="skill"><span>${MQ.escapeHtml(s.label)}</span><div class="bar"><i style="width:${pct}%"></i></div><span>${s.right}/${s.tries}</span></div>`;
+    }).join('');
+    return `
+      <div class="gp-card">
+        <h3>${game.art[0]} ${game.name}</h3>
+        <div class="gp-level">Level
+          <button class="btn secondary small" data-level="${game.id}" data-delta="-1" aria-label="Level down">−</button>
+          <span id="gp-level-${game.id}">${g.level || 1}</span>
+          <button class="btn secondary small" data-level="${game.id}" data-delta="1" aria-label="Level up">+</button>
+        </div>
+        <p>Played <b>${g.played || 0}</b> · Highest level <b>${g.maxLevel || 1}</b> · Avg ⭐ <b>${avgStars}</b> · ${minutes(g.seconds)}</p>
+        ${game.levels ? `<p class="muted">${game.levels}</p>` : ''}
+        ${skills ? `<div class="skills">${skills}</div>` : ''}
+        ${hist.length ? `<table class="hist"><tr><th>Level</th><th>Stars</th><th>Details</th></tr>
+          ${hist.map((h) => `<tr><td>${h.level}</td><td>${'⭐'.repeat(h.stars)}</td><td>${MQ.escapeHtml(summaryFor(game.id, h))}</td></tr>`).join('')}
+        </table>` : '<p class="muted">Not played yet.</p>'}
+      </div>`;
+  }
+
+  function renderGrownups() {
     $('gp-body').innerHTML = `
       <div class="gp-grid">
         <div class="gp-card">
           <h3>Player & settings</h3>
           <label>Name <input type="text" id="gp-name" maxlength="20" value="${MQ.escapeHtml(data.player.name || '')}"></label>
           <label><input type="checkbox" id="gp-sound" ${data.settings.sound ? 'checked' : ''}> Sound effects</label>
-          <label><input type="checkbox" id="gp-music" ${data.settings.music !== false ? 'checked' : ''}> Background music (Bach, Mozart)</label>
+          <label><input type="checkbox" id="gp-music" ${data.settings.music !== false ? 'checked' : ''}> Background music (Bach, Mozart, Pachelbel, Beethoven)</label>
           <label><input type="checkbox" id="gp-voice" ${data.settings.voice ? 'checked' : ''}> Read questions aloud</label>
-          <label><input type="checkbox" id="gp-chinese" ${data.settings.chinese ? 'checked' : ''}> Show amounts in Chinese too (四十七分)</label>
+          <label><input type="checkbox" id="gp-chinese" ${data.settings.chinese ? 'checked' : ''}> Show numbers in Chinese too (四十七分, 三点半)</label>
           <p class="muted">Total play time: ${minutes(data.playSeconds)} · Stars: ${data.stars}</p>
+          <p class="muted">Each game adapts on its own: it moves up after a great round and down after two hard ones. Use −/+ if a game feels too easy or too hard.</p>
         </div>
-
         <div class="gp-card">
-          <h3>🪙 Coin Crossing</h3>
-          <div class="gp-level">Level
-            <button class="btn secondary small" id="gp-down">−</button>
-            <span id="gp-level">${cc.level}</span>
-            <button class="btn secondary small" id="gp-up">+</button>
+          <h3>Save & backup</h3>
+          <p class="muted">Progress saves automatically in this browser on this Mac. Use a backup file to move it to another browser or computer.</p>
+          <div class="row" style="justify-content:flex-start">
+            <button class="btn secondary small" id="gp-export">⬇ Download backup</button>
+            <label class="btn secondary small" style="margin:0">⬆ Restore backup <input type="file" id="gp-import" accept="application/json,.json" hidden></label>
+            <button class="btn secondary small" id="gp-reset">Start over…</button>
           </div>
-          <p class="muted">The game moves up after a 3-star level (or two 2-star levels) and down after two 1-star levels. Use −/+ if it feels too easy or too hard.</p>
-          <p>Levels played: <b>${cc.played || 0}</b> · Highest level: <b>${cc.maxLevel || 1}</b> · Avg stars (last 10): <b>${avgStars}</b></p>
-          <p class="muted">Levels 1–2 pennies & nickels · 3–4 add dimes · 5–7 add quarters · 8–9 dollars ($1.35) · 10+ mixed cents/dollars (must convert) · 14+ $5 bills.</p>
         </div>
-
-        <div class="gp-card">
-          <h3>Bonus question skills</h3>
-          ${skills}
-          <p class="muted">Weaker skills are asked more often.</p>
-        </div>
-
-        <div class="gp-card">
-          <h3>Recent levels</h3>
-          ${hist.length ? `<table class="hist"><tr><th>Level</th><th>Goal</th><th>Stars</th><th>Too much</th><th>Bonks</th><th>Time</th></tr>
-            ${hist.map((h) => `<tr><td>${h.level}</td><td>${MQ.dollars(h.target)}</td><td>${'⭐'.repeat(h.stars)}</td><td>${h.overshoots}</td><td>${h.bonks}</td><td>${h.seconds}s</td></tr>`).join('')}
-          </table>` : '<p class="muted">No levels played yet.</p>'}
-        </div>
-      </div>
-
-      <div class="gp-card" style="margin-top:18px">
-        <h3>Save & backup</h3>
-        <p class="muted">Progress saves automatically in this browser on this Mac. Use a backup file to move it to another browser or computer.</p>
-        <div class="row" style="justify-content:flex-start">
-          <button class="btn secondary small" id="gp-export">⬇ Download backup</button>
-          <label class="btn secondary small" style="margin:0">⬆ Restore backup <input type="file" id="gp-import" accept="application/json,.json" hidden></label>
-          <button class="btn secondary small" id="gp-reset">Start over…</button>
-        </div>
+        ${GAMES.map(gameCard).join('')}
       </div>`;
 
     const setting = (id, key) => $(id).addEventListener('change', (e) => {
@@ -208,18 +232,17 @@
     setting('gp-chinese', 'chinese');
     $('gp-name').addEventListener('input', (e) => { data.player.name = e.target.value.trim(); MQ.save(data); render(); });
 
-    const setLevel = (delta) => {
-      const g = (data.games.coinCrossing = data.games.coinCrossing || { level: 1, maxLevel: 1, played: 0, history: [], quiz: {} });
-      g.level = Math.max(1, Math.min(30, (g.level || 1) + delta));
+    $('gp-body').querySelectorAll('[data-level]').forEach((btn) => btn.addEventListener('click', () => {
+      const id = btn.dataset.level;
+      const g = (data.games[id] = data.games[id] || { level: 1, maxLevel: 1, played: 0, history: [] });
+      g.level = Math.max(1, Math.min(30, (g.level || 1) + Number(btn.dataset.delta)));
       g.maxLevel = Math.max(g.maxLevel || 1, g.level);
       g.struggles = 0;
       g.goodStreak = 0;
       MQ.save(data);
-      $('gp-level').textContent = g.level;
+      $(`gp-level-${id}`).textContent = g.level;
       render();
-    };
-    $('gp-down').addEventListener('click', () => setLevel(-1));
-    $('gp-up').addEventListener('click', () => setLevel(1));
+    }));
 
     $('gp-export').addEventListener('click', () => MQ.exportFile(data));
     $('gp-import').addEventListener('change', async (e) => {

@@ -1,5 +1,7 @@
 body {
   min-height: 100vh;
+  position: relative;
+  overflow-x: hidden;
   background:
     radial-gradient(circle at 10% 0%, #ffe3b3 0, transparent 40%),
     radial-gradient(circle at 90% 10%, #d6efff 0, transparent 40%),
@@ -28,40 +30,81 @@ body {
   box-shadow: 0 3px 0 var(--line);
 }
 
-main { padding: 0 36px 20px; max-width: 1200px; }
+main { padding: 0 36px 20px; max-width: 1440px; }
 .section { font-size: 24px; margin: 22px 0 12px; display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
 .tip { font-size: 15px; color: var(--muted); font-weight: 600; }
 
 .games {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 18px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 20px;
 }
+@media (max-width: 1100px) { .games { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
 .tile {
   position: relative;
   border: 4px solid transparent;
-  border-radius: 24px;
-  padding: 18px;
+  border-radius: 26px;
+  padding: 0;
+  overflow: hidden;
   text-align: left;
   color: var(--ink);
   background: var(--card);
-  box-shadow: 0 6px 0 var(--line);
-  min-height: 190px;
+  box-shadow: 0 8px 0 var(--line), 0 14px 30px rgba(120, 90, 40, 0.12);
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  transition: transform 0.12s;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
-.tile:hover, .tile:focus-visible { transform: translateY(-4px); }
-.tile:focus-visible { outline: none; border-color: var(--focus); }
-.tile .icon { font-size: 52px; line-height: 1; }
+.tile:hover, .tile:focus-visible { transform: translateY(-6px) rotate(-0.4deg); }
+.tile:focus-visible { outline: none; border-color: var(--focus); box-shadow: 0 8px 0 #9fcff5, 0 18px 36px rgba(40, 120, 200, 0.25); }
+
+.tile .art {
+  position: relative;
+  height: 136px;
+  display: block;
+  overflow: hidden;
+}
+.tile .art::after {
+  /* soft ground hill */
+  content: "";
+  position: absolute;
+  left: -10%;
+  right: -10%;
+  bottom: -46px;
+  height: 80px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.25);
+}
+.tile .art span { position: absolute; line-height: 1; filter: drop-shadow(0 4px 4px rgba(0, 0, 0, 0.18)); }
+.tile .a1 { font-size: 72px; left: 50%; top: 22px; transform: translateX(-50%); animation: bob 3.2s ease-in-out infinite; }
+.tile .a2 { font-size: 34px; left: 14%; top: 60px; animation: bob 2.6s ease-in-out infinite 0.4s; }
+.tile .a3 { font-size: 34px; right: 14%; top: 30px; animation: bob 2.9s ease-in-out infinite 0.9s; }
+.tile:focus-visible .a1, .tile:hover .a1 { animation-duration: 1.2s; }
+@keyframes bob { 0%, 100% { transform: translate(var(--tx, 0), 0); } 50% { transform: translate(var(--tx, 0), -8px); } }
+.tile .a1 { --tx: -50%; }
+
+.theme-coins .art { background: linear-gradient(180deg, #8fd3ff 0%, #c8ecff 55%, #8fdc6e 56%, #6cc24f 100%); }
+.theme-flow .art { background: radial-gradient(circle at 30% 30%, #4b4f9e 0%, #2b2d63 70%); }
+.theme-flow .art::after { background: rgba(255, 255, 255, 0.08); }
+.theme-clock .art { background: linear-gradient(180deg, #ffd89b 0%, #ffb88c 100%); }
+.theme-climb .art { background: linear-gradient(180deg, #ff9a8b 0%, #a86fd6 100%); }
+
+.tile .body { display: flex; flex-direction: column; gap: 6px; padding: 14px 18px 18px; flex: 1; }
+.tile .tag {
+  align-self: flex-start;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: #f4ecdf;
+  padding: 3px 9px;
+  border-radius: 999px;
+}
 .tile .name { font-size: 24px; font-weight: 900; }
-.tile .what { font-size: 15px; color: var(--muted); font-weight: 600; }
-.tile .progress { margin-top: auto; font-size: 16px; font-weight: 800; color: var(--accent); }
-.tile.soon { background: #f6f1e8; }
-.tile.soon .icon { filter: grayscale(0.6); opacity: 0.7; }
-.tile.soon .progress { color: var(--muted); }
-.tile.play { background: linear-gradient(160deg, #fff 0%, #fff4e0 100%); }
+.tile .name .zh { font-size: 16px; color: var(--muted); font-weight: 600; margin-left: 4px; white-space: nowrap; display: inline-block; }
+.tile .what { font-size: 15px; color: var(--muted); font-weight: 600; line-height: 1.35; }
+.tile .progress { margin-top: auto; padding-top: 8px; font-size: 17px; font-weight: 900; color: var(--accent); }
 
 .heroes { display: flex; flex-wrap: wrap; gap: 12px; }
 .hero {
@@ -115,6 +158,8 @@ footer { padding: 10px 36px 30px; }
 .gp-card input[type="checkbox"] { width: 20px; height: 20px; }
 .gp-card input[type="text"] { font: inherit; font-size: 16px; padding: 4px 8px; border-radius: 8px; border: 2px solid var(--line); }
 .gp-card p { margin: 6px 0; font-size: 15px; }
+.gp-card .skills { margin: 8px 0; }
+.gp-card table.hist { margin-top: 8px; }
 .gp-level { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 800; }
 .skill { display: grid; grid-template-columns: 130px 1fr 60px; gap: 8px; align-items: center; font-size: 14px; margin: 4px 0; }
 .bar { height: 10px; background: #e9e1d3; border-radius: 99px; overflow: hidden; }
@@ -126,4 +171,41 @@ table.hist th, table.hist td { text-align: left; padding: 3px 6px; border-bottom
 @media (max-width: 700px) {
   .top, main, footer { padding-left: 16px; padding-right: 16px; }
   .gp-grid { grid-template-columns: 1fr; }
+}
+
+/* Gentle scenery behind the portal */
+.sky { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
+.sky .cloud {
+  position: absolute;
+  width: 180px;
+  height: 56px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.75);
+  filter: blur(1px);
+  animation: drift linear infinite;
+}
+.sky .cloud::before, .sky .cloud::after {
+  content: "";
+  position: absolute;
+  background: inherit;
+  border-radius: 50%;
+}
+.sky .cloud::before { width: 80px; height: 80px; left: 26px; top: -38px; }
+.sky .cloud::after { width: 60px; height: 60px; left: 90px; top: -26px; }
+.sky .c1 { top: 12%; animation-duration: 90s; animation-delay: -20s; }
+.sky .c2 { top: 30%; transform: scale(0.7); animation-duration: 120s; animation-delay: -70s; opacity: 0.7; }
+.sky .c3 { top: 6%; transform: scale(0.5); animation-duration: 150s; animation-delay: -110s; opacity: 0.6; }
+@keyframes drift { from { left: -240px; } to { left: 110vw; } }
+.sky .hills {
+  position: absolute;
+  left: -5%;
+  right: -5%;
+  bottom: -120px;
+  height: 260px;
+  background:
+    radial-gradient(60% 100% at 20% 100%, #bfe6a8 0 60%, transparent 61%),
+    radial-gradient(55% 90% at 75% 100%, #cdeeb6 0 60%, transparent 61%);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tile .art span, .sky .cloud { animation: none; }
 }
