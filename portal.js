@@ -143,6 +143,7 @@
   }
 
   function focusFirst() {
+    if (MQ.isTouch) return; // keyboard focus rings only make sense on the laptop
     const first = document.querySelector('.tile.play');
     if (first) first.focus();
   }
@@ -210,11 +211,12 @@
           <label><input type="checkbox" id="gp-voice" ${data.settings.voice ? 'checked' : ''}> Read questions aloud</label>
           <label><input type="checkbox" id="gp-chinese" ${data.settings.chinese ? 'checked' : ''}> Show numbers in Chinese too (四十七分, 三点半)</label>
           <p class="muted">Total play time: ${minutes(data.playSeconds)} · Stars: ${data.stars}</p>
+          ${MQ.isTouch && !MQ.isStandalone ? `<div class="install-tip">📱 <b>Make it an app:</b> in Safari tap the Share button (the square with an arrow ⬆), then <b>Add to Home Screen</b>. It opens full-screen and works offline.</div>` : ''}
           <p class="muted">Each game adapts on its own: it moves up after a great round and down after two hard ones. Use −/+ if a game feels too easy or too hard.</p>
         </div>
         <div class="gp-card">
           <h3>Save & backup</h3>
-          <p class="muted">Progress saves automatically in this browser on this Mac. Use a backup file to move it to another browser or computer.</p>
+          <p class="muted">Progress saves automatically on this device (the laptop and the iPhone each keep their own). Use a backup file to move it to another browser or computer.</p>
           <div class="row" style="justify-content:flex-start">
             <button class="btn secondary small" id="gp-export">⬇ Download backup</button>
             <label class="btn secondary small" style="margin:0">⬆ Restore backup <input type="file" id="gp-import" accept="application/json,.json" hidden></label>
@@ -271,6 +273,7 @@
     });
   }
 
+  $('gear-btn').addEventListener('click', () => { renderGrownups(); $('grownups').showModal(); });
   $('grownups-btn').addEventListener('click', () => {
     renderGrownups();
     $('grownups').showModal();

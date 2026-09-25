@@ -168,10 +168,81 @@ table.hist { width: 100%; border-collapse: collapse; font-size: 14px; }
 table.hist th, table.hist td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); }
 .muted { color: var(--muted); }
 
+/* Keep clear of the notch / Dynamic Island / home indicator. */
+.top { padding-top: max(22px, env(safe-area-inset-top)); padding-left: max(36px, env(safe-area-inset-left)); padding-right: max(36px, env(safe-area-inset-right)); }
+footer { padding-bottom: max(30px, calc(env(safe-area-inset-bottom) + 12px)); }
+
 @media (max-width: 700px) {
-  .top, main, footer { padding-left: 16px; padding-right: 16px; }
+  .top, main, footer { padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
+  .top { padding-top: max(14px, env(safe-area-inset-top)); gap: 8px; }
+  .logo { font-size: 38px; }
+  .brand { gap: 10px; }
+  .top h1 { font-size: 26px; line-height: 1.1; }
+  .top h1 .zh { display: block; font-size: 15px; margin: 2px 0 0; }
+  .hello { font-size: 15px; }
+  .hero-now { font-size: 36px; }
+  .star-count { font-size: 18px; padding: 6px 12px; }
+  .section { font-size: 20px; margin: 14px 0 10px; }
+  .games { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .tile { border-radius: 20px; box-shadow: 0 5px 0 var(--line), 0 8px 18px rgba(120, 90, 40, 0.12); }
+  .tile .art { height: 92px; }
+  .tile .a1 { font-size: 50px; top: 14px; }
+  .tile .a2, .tile .a3 { font-size: 24px; }
+  .tile .a2 { top: 46px; }
+  .tile .a3 { top: 18px; }
+  .tile .body { padding: 10px 12px 12px; gap: 4px; }
+  .tile .tag { font-size: 10px; padding: 2px 7px; }
+  .tile .name { font-size: 18px; line-height: 1.15; }
+  .tile .name .zh { display: block; margin: 2px 0 0; font-size: 13px; }
+  .tile .what { display: none; }
+  .tile .progress { font-size: 15px; padding-top: 4px; }
+  .heroes { flex-wrap: nowrap; overflow-x: auto; padding: 4px 2px 10px; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
+  .hero { flex: none; width: 76px; scroll-snap-align: start; }
+  .hero .e { font-size: 34px; }
+  .dialog.wide { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; border-radius: 0; padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom)); }
   .gp-grid { grid-template-columns: 1fr; }
+  .skill { grid-template-columns: 110px 1fr 48px; }
 }
+
+/* Phone held sideways: short screen, so keep everything compact and in one row. */
+@media (max-height: 500px) and (orientation: landscape) {
+  .top { padding-top: max(8px, env(safe-area-inset-top)); padding-bottom: 0; }
+  .logo { font-size: 32px; }
+  .top h1 { font-size: 24px; }
+  .hello { font-size: 14px; }
+  .hero-now { font-size: 32px; }
+  .star-count { font-size: 18px; padding: 5px 12px; }
+  .section { font-size: 18px; margin: 8px 0 8px; }
+  .tip { display: none; }
+  .games { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .tile .art { height: 78px; }
+  .tile .a1 { font-size: 44px; top: 12px; }
+  .tile .a2, .tile .a3 { font-size: 22px; }
+  .tile .a2 { top: 40px; }
+  .tile .body { padding: 8px 12px 10px; gap: 2px; }
+  .tile .what { display: none; }
+  .tile .name { font-size: 17px; }
+  .tile .name .zh { display: none; }
+  .tile .progress { font-size: 14px; padding-top: 2px; }
+  .heroes { flex-wrap: nowrap; overflow-x: auto; }
+  .hero { flex: none; width: 70px; padding: 4px; }
+  .hero .e { font-size: 30px; }
+  .dialog.wide { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; border-radius: 0; padding: 12px max(16px, env(safe-area-inset-right)) 12px max(16px, env(safe-area-inset-left)); }
+}
+
+.star-count { white-space: nowrap; }
+.gear { display: none; border: none; background: #fff; border-radius: 999px; font-size: 20px; width: 40px; height: 40px; box-shadow: 0 3px 0 var(--line); }
+@media (max-width: 700px), (max-height: 500px) and (orientation: landscape) {
+  .gear { display: inline-flex; align-items: center; justify-content: center; flex: none; }
+  footer { display: none; }
+}
+@media (max-width: 480px) {
+  .logo { display: none; }
+  .top h1 { white-space: nowrap; font-size: 25px; }
+  .me { gap: 8px; }
+  .hero-now { font-size: 32px; }
+}
+.install-tip { background: #eaf5ff; border: 2px solid #b9dcff; border-radius: 14px; padding: 10px 12px; font-size: 15px; margin-top: 10px; }
 
 /* Gentle scenery behind the portal */
 .sky { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }

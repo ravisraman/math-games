@@ -2,10 +2,18 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Math Quest">
+  <meta name="theme-color" content="#fff8ec">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" href="icons/icon-192.png">
   <title>Math Quest</title>
-  <link rel="stylesheet" href="shared/style.css?v=5">
-  <link rel="stylesheet" href="portal.css?v=5">
+  <link rel="stylesheet" href="shared/style.css?v=6">
+  <link rel="stylesheet" href="portal.css?v=6">
 </head>
 <body>
   <div class="sky" aria-hidden="true"><div class="cloud c1"></div><div class="cloud c2"></div><div class="cloud c3"></div><div class="hills"></div></div>
@@ -20,11 +28,12 @@
     <div class="me">
       <span class="hero-now" id="hero-now">🐥</span>
       <span class="star-count">⭐ <b id="star-count">0</b></span>
+      <button class="gear" id="gear-btn" aria-label="Grown-ups corner">⚙️</button>
     </div>
   </header>
 
   <main>
-    <h2 class="section">Pick a game <span class="tip">use <span class="key">←</span><span class="key">→</span><span class="key">↑</span><span class="key">↓</span> and <span class="key">return</span></span></h2>
+    <h2 class="section">Pick a game <span class="tip touch-only">tap a game to play</span> <span class="tip keys-only">use <span class="key">←</span><span class="key">→</span><span class="key">↑</span><span class="key">↓</span> and <span class="key">return</span></span></h2>
     <div class="games" id="games"></div>
 
     <h2 class="section">Your hero</h2>
@@ -40,7 +49,7 @@
       <h2>Hi! What's your name?</h2>
       <input id="name-input" maxlength="20" autocomplete="off" placeholder="Type your name">
       <div class="row">
-        <button class="btn" value="ok">Let's play! ⏎</button>
+        <button class="btn" value="ok">Let's play! <span class="keys-only">⏎</span></button>
       </div>
     </form>
   </dialog>
@@ -53,7 +62,7 @@
     <div id="gp-body"></div>
   </dialog>
 
-  <script src="shared/core.js?v=5"></script>
-  <script src="portal.js?v=5"></script>
+  <script src="shared/core.js?v=6"></script>
+  <script src="portal.js?v=6"></script>
 </body>
 </html>
