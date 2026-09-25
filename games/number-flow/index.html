@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Number Flow</title>
+  <link rel="stylesheet" href="../../shared/style.css?v=5">
+  <link rel="stylesheet" href="game.css?v=5">
+</head>
+<body>
+  <main class="layout">
+    <div class="stage" id="stage">
+      <canvas id="board" aria-label="Number Flow puzzle board"></canvas>
+      <div class="overlay" id="overlay" hidden></div>
+    </div>
+
+    <aside class="panel">
+      <div class="panel-top">
+        <a class="home" href="../../index.html" title="Back to the portal">🏠</a>
+        <div class="level-pill">Level <span id="level">1</span></div>
+        <div class="star-pill">⭐ <span id="stars">0</span></div>
+      </div>
+
+      <section class="box pairs-box">
+        <div class="label">🎯 Connect the dots</div>
+        <div class="pairs" id="pairs"></div>
+      </section>
+
+      <section class="box sum-box" id="sum-box">
+        <div class="label">➕ Adding up</div>
+        <div class="sentence" id="sentence">—</div>
+        <div class="zh sub" id="sentence-zh"></div>
+        <div class="need" id="need"></div>
+      </section>
+
+      <section class="bubble" id="bubble" aria-live="polite">
+        <span class="mascot">🐼</span>
+        <span id="message">Move to a dot and press space!</span>
+      </section>
+
+      <section class="controls">
+        <div><span class="key">←</span><span class="key">↑</span><span class="key">↓</span><span class="key">→</span> move / draw</div>
+        <div><span class="key">space</span> pick up a dot or path</div>
+        <div><span class="key">esc</span> stop drawing / pause</div>
+        <div><span class="key">H</span> hint 💡 <span class="dim">(costs a ⭐)</span></div>
+        <div><span class="key">R</span> start over &nbsp; <span class="key">M</span> music</div>
+      </section>
+    </aside>
+  </main>
+
+  <script src="../../shared/core.js?v=5"></script>
+  <script src="game.js?v=5"></script>
+</body>
+</html>
