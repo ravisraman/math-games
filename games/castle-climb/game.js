@@ -103,7 +103,10 @@
   let fallT = 0;
   let topT = 0;
   let resultShown = false;
-  const heroP = { lane: 1, from: 1, t: 1, jt: 0, sq: 0, sqV: 0 };
+  // lane -1 = standing at the doorway in the middle: not under any ledge, so no answer is
+  // highlighted until he chooses one himself (no "leading the witness").
+  const HOME = -1;
+  const heroP = { lane: HOME, from: HOME, t: 1, dur: 0.15, jt: 0, sq: 0, sqV: 0 };
   let queuedMove = 0;
   let queuedJump = false;
   let stats = null;
@@ -125,6 +128,7 @@
   const camOff = () => HERO_Y + cam * FH;
   const sy = (f) => camOff() - f * FH; // screen y of a floor's walking surface
   const laneX = (i) => TX0 + (TW * (i + 0.5)) / lanes;
+  const posX = (i) => (i < 0 ? TCX : laneX(i)); // the doorway is in the middle
   const ledgeW = () => Math.min(lanes === 3 ? 150 : 116, TW / lanes - 10);
   const eaveExt = (n) => Math.min(n, Math.max(14, TX0 - 4));
 
@@ -144,7 +148,7 @@
     lanes = lv.ledges;
     floor = 0;
     cam = camFrom = camTo = 0;
-    heroP.lane = heroP.from = Math.floor((lanes - 1) / 2);
+    heroP.lane = heroP.from = HOME;
     heroP.t = 1;
     heroP.sq = heroP.sqV = 0;
     queuedMove = 0;
@@ -206,6 +210,8 @@
     p.build = 0;
     problem = p;
     stats.keys.push(p.key);
+    // Each new floor starts at the doorway (he strolls back from the ledge he landed on).
+    if (heroP.lane !== HOME) { heroP.from = heroP.lane; heroP.lane = HOME; heroP.t = 0; heroP.dur = 0.34; }
     problemClock = 0;
     idleClock = 0;
     nudged = false;
@@ -299,11 +305,15 @@
     if (state !== 'play') return;
     idleClock = 0;
     if (heroP.t < 1) { queuedMove = d; return; }
-    const nl = clamp(heroP.lane + d, 0, lanes - 1);
+    const mid = (lanes - 1) / 2;
+    // From the doorway the first step goes to the nearest ledge on that side
+    // (3 ledges: ← left one, → right one; 4 ledges: ← 2nd, → 3rd).
+    const nl = heroP.lane === HOME ? (d < 0 ? Math.ceil(mid) - 1 : Math.floor(mid) + 1) : clamp(heroP.lane + d, 0, lanes - 1);
     if (nl === heroP.lane) { heroP.sq = 0.12; return; }
     heroP.from = heroP.lane;
     heroP.lane = nl;
     heroP.t = 0;
+    heroP.dur = SIDE_T;
     MQ.Sound.hop(floor, true);
   }
 
@@ -312,6 +322,7 @@
     heroP.from = heroP.lane;
     heroP.lane = lane;
     heroP.t = 0;
+    heroP.dur = SIDE_T;
     MQ.Sound.hop(floor, true);
   }
 
@@ -319,6 +330,13 @@
     if (state !== 'play' || !problem) return;
     idleClock = 0;
     if (heroP.t < 1) { queuedJump = true; return; }
+    if (heroP.lane === HOME) {
+      // Not under an answer yet: he just bounces on the spot.
+      MQ.Sound.nope();
+      heroP.sq = -0.2;
+      say(touchUI() ? 'Tap an answer to jump to it! 👆' : 'Walk under an answer first — use ⬅ ➡');
+      return;
+    }
     const ledge = problem.ledges[heroP.lane];
     if (!ledge.alive) {
       MQ.Sound.nope();
@@ -731,7 +749,7 @@
 
     // Hero: sideways hops
     if (heroP.t < 1) {
-      heroP.t = Math.min(1, heroP.t + dt / SIDE_T);
+      heroP.t = Math.min(1, heroP.t + dt / heroP.dur);
       if (heroP.t === 1) {
         heroP.sq = 0.12;
         if (queuedMove) { const d = queuedMove; queuedMove = 0; move(d); }
@@ -1331,7 +1349,7 @@
       return;
     }
     const pressed = state === 'play' && pressOnLedge ? pressLane : -1;
-    const aim = pressed >= 0 ? -1 : state === 'play' && heroP.t >= 1 ? heroP.lane : -1;
+    const aim = pressed >= 0 ? -1 : state === 'play' && heroP.t >= 1 && heroP.lane >= 0 ? heroP.lane : -1;
     problem.ledges.forEach((L, i) => drawLedge(i, L, y, 1, i === aim, i === pressed));
   }
 
@@ -1351,8 +1369,9 @@
 
   function heroPos() {
     const e = ease(heroP.t);
-    let x = lerp(laneX(heroP.from), laneX(heroP.lane), e);
-    let y = sy(floor) - Math.sin(Math.PI * heroP.t) * 14;
+    let x = lerp(posX(heroP.from), posX(heroP.lane), e);
+    const hops = heroP.dur > SIDE_T ? 2 : 1; // the stroll back to the doorway is two little hops
+    let y = sy(floor) - Math.abs(Math.sin(Math.PI * hops * heroP.t)) * (hops > 1 ? 10 : 14);
     if (state === 'jump') {
       const p = heroP.jt;
       const y0 = sy(floor);
@@ -1391,7 +1410,24 @@
 
     // A bobbing "jump" arrow when he has been waiting a bit.
     const wait = g.played < 2 ? 2.5 : 6;
-    if (state === 'play' && idleClock > wait && problem && problem.ledges[heroP.lane].alive) {
+    if (state === 'play' && heroP.lane === HOME && heroP.t >= 1 && idleClock > wait && !touchUI()) {
+      // At the doorway: the same bobbing arrow on BOTH sides — walk either way.
+      const a = clamp((idleClock - wait) * 2, 0, 1);
+      ctx.globalAlpha = a;
+      const bob = Math.sin(time * 6) * 5;
+      for (const d of [-1, 1]) {
+        const ax = x + d * (56 + bob);
+        const ay = y - 34;
+        ctx.fillStyle = '#fff';
+        ctx.strokeStyle = '#d99a00';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(ax + d * 18, ay); ctx.lineTo(ax, ay - 16); ctx.lineTo(ax, ay - 7); ctx.lineTo(ax - d * 16, ay - 7);
+        ctx.lineTo(ax - d * 16, ay + 7); ctx.lineTo(ax, ay + 7); ctx.lineTo(ax, ay + 16); ctx.closePath();
+        ctx.fill(); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    } else if (state === 'play' && heroP.lane >= 0 && idleClock > wait && problem && problem.ledges[heroP.lane].alive) {
       const a = clamp((idleClock - wait) * 2, 0, 1);
       ctx.globalAlpha = a;
       const ay = y - 92 + Math.sin(time * 6) * 6;

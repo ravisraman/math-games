@@ -46,7 +46,7 @@
   // length) allowed to make the target, near = how close a "tempting" wrong route must get.
   const LEVELS = [
     null,
-    { n: 4, pairs: 2, lo: 1, hi: 4, len: [3, 3], minT: 6, maxT: 11, cap: 2, near: 2 }, // 1
+    { n: 4, pairs: 2, lo: 1, hi: 4, len: [3, 4], minT: 5, maxT: 12, cap: 2, near: 2 }, // 1
     { n: 4, pairs: 2, lo: 1, hi: 5, len: [3, 4], minT: 7, maxT: 14, cap: 2, near: 2 }, // 2
     { n: 5, pairs: 2, lo: 1, hi: 6, len: [3, 5], minT: 8, maxT: 18, cap: 2, near: 2 }, // 3
     { n: 5, pairs: 3, lo: 1, hi: 6, len: [3, 4], minT: 8, maxT: 20, cap: 2, near: 2 }, // 4
@@ -191,13 +191,15 @@
     return res;
   }
 
+  // Must-haves cost whole points; "the straight way is only a little off" is a nice-to-have
+  // worth a quarter point per pair, so a board is fine (cost < 1) without it.
   function costOf(checks, cfg) {
     let c = 0;
     for (const r of checks) {
       if (r.spHit) c += 1000;
       if (r.hits > cfg.cap) c += 10 * (r.hits - cfg.cap);
       if (!r.near) c += 3;
-      if (!r.spNear) c += 1; // nicest: the straight way is only a little off
+      if (!r.spNear) c += 0.25 / checks.length;
     }
     return c;
   }
@@ -265,7 +267,7 @@
       let checks = pairs.map((_, p) => check(p));
       let cost = costOf(checks, cfg);
       // Nudge one number at a time; keep the change unless it makes things worse.
-      for (let it = 0; it < 70 && cost > 0; it++) {
+      for (let it = 0; it < 90 && cost > 0 && !(cost < 1 && it >= 40); it++) {
         const worst = checks.find((r) => r.bad) || null;
         let i;
         if (worst && Math.random() < 0.8) {
@@ -291,9 +293,9 @@
       }
       if (cost < bestCost) {
         bestCost = cost;
-        best = { n, cfg, cells: cells.map((c) => ({ num: c.num, pair: c.pair })), pairs: pairs.map((pr) => Object.assign({}, pr)), level: L, cost };
+        best = { n, cfg, cells: cells.map((c) => ({ num: c.num, pair: c.pair })), pairs: pairs.map((pr) => Object.assign({}, pr)), level: L, cost: Math.floor(cost) };
       }
-      if (cost === 0) break;
+      if (cost < 1 && (cost === 0 || clock() - t0 > 6)) break;
     }
     if (best) return best;
     return generate(L, (forcePairs || cfg.pairs) - 1); // board too crowded: one fewer pair
@@ -517,10 +519,10 @@
     wrongFlash = { p, t: 0 };
     const diff = Math.abs(s - pr.target);
     const eq = t.length ? `${t.join(' + ')} = ${s}` : 'That path has no numbers';
-    if (!t.length) say(`Oops! The path needs to go through some numbers to make ${pr.target}. Step back ↩ and go around.`);
-    else if (s > pr.target) say(`${eq}. Too much! The target is ${pr.target}. Step back ↩ and find a way with ${diff} less.`);
-    else say(`${eq}. Not enough — ${diff} more to make ${pr.target}. Step back ↩ and take a longer way.`);
-    MQ.Voice.say(s > pr.target ? `${s}. Too much! We need ${pr.target}.` : `${s}. We need ${pr.target}. ${diff} more.`, 'en-US', { interrupt: true });
+    if (!t.length) say(`Oops! The path needs to go through some numbers to make ${pr.target}. Try a different way — go around! ↩`);
+    else if (s > pr.target) say(`${eq}. Too much! The target is ${pr.target}. Try a different way — go around! ↩ Find a way with ${diff} less.`);
+    else say(`${eq}. Not enough to make ${pr.target}. Try a different way — go around! ↩ Find a way with ${diff} more.`);
+    MQ.Voice.say(s > pr.target ? `${s}. Too much! We need ${pr.target}. Try a different way!` : `${s}. We need ${pr.target}. ${diff} more. Try a different way!`, 'en-US', { interrupt: true });
     updateHud();
   }
 
@@ -973,23 +975,39 @@
     overlayKeys = null;
   }
 
+  // Tiny picture for the intro card: a 3×2 board, 7 ⋯ 7 on top with a 5 between them and
+  // 3 1 3 underneath. The straight way makes 5 (wrong); going around makes 3 + 1 + 3 = 7.
+  function demoBoard(route) {
+    const nums = [7, 5, 7, 3, 1, 3];
+    const at = (i) => ({ x: 22 + (i % 3) * 44, y: 22 + Math.floor(i / 3) * 44 });
+    const tiles = nums.map((_, i) => { const { x, y } = at(i); return `<rect x="${x - 20}" y="${y - 20}" width="40" height="40" rx="8" fill="#ece6ff"/>`; }).join('');
+    const line = route.map((i) => { const { x, y } = at(i); return `${x},${y}`; }).join(' ');
+    const marks = nums.map((v, i) => {
+      const { x, y } = at(i);
+      const dot = i === 0 || i === 2;
+      const on = route.includes(i);
+      return dot
+        ? `<circle cx="${x}" cy="${y}" r="17" fill="#4c8dff" stroke="#fff" stroke-width="3"/><text x="${x}" y="${y + 6}" fill="#fff">${v}</text>`
+        : `<circle cx="${x}" cy="${y}" r="12" fill="#fff" stroke="${on ? '#2a5fcf' : '#d5cdea'}" stroke-width="${on ? 3 : 2}"/><text x="${x}" y="${y + 6}" fill="#2d2a32">${v}</text>`;
+    }).join('');
+    return `<svg viewBox="0 0 132 88" aria-hidden="true">${tiles}<polyline points="${line}" fill="none" stroke="#4c8dff" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" opacity="0.85"/>${marks}</svg>`;
+  }
+
   function showIntro() {
     state = 'intro';
     const first = g.played === 0;
     const targets = puzzle.pairs.map((pr) => `<div>${dotHtml(pr)}${zh(pr.target) ? `<span class="zhn zh">${zh(pr.target)}</span>` : ''}</div>`).join('');
     const demo = `
       <div class="demo">
-        <span class="dot" style="background:#4c8dff">7</span><span class="link"></span>
-        <span class="bead">3</span><span class="link"></span>
-        <span class="bead">4</span><span class="link"></span>
-        <span class="dot" style="background:#4c8dff">7</span>
+        <figure class="no">${demoBoard([0, 1, 2])}<figcaption>5 ✗ <small>not 7</small></figcaption></figure>
+        <figure class="yes">${demoBoard([0, 3, 4, 5, 2])}<figcaption>3 + 1 + 3 = 7 ✅</figcaption></figure>
       </div>
-      <div class="demo-eq">3 + 4 = 7 ✅</div>`;
+      <div class="demo-tip">The short way is usually wrong.<br><b>Add up</b> the numbers and go around!</div>`;
     showOverlay(`
       <div class="card">
         <h1>🧩 Level ${g.level}</h1>
         <p>Connect each pair of dots.<br>The numbers on your path must <b>add up</b> to the dot!</p>
-        ${first || g.level <= 2 ? demo : ''}
+        ${first || g.level <= 2 ? demo : '<p class="hint">🤔 The short way is usually wrong — add up and go around!</p>'}
         <div class="targets">${targets}</div>
         ${first ? `<p class="hint keys-only">Move with the arrows. Press <span class="key">space</span> on a dot, then walk to its twin.<br>Step back to undo. Stuck? Press <span class="key">H</span> for a hint.</p>` : ''}
         ${first ? `<p class="hint touch-only">👆 Put your finger on a dot and drag to its twin.<br>Slide back to undo. Stuck? Tap 💡 Hint.</p>` : ''}
@@ -1001,7 +1019,7 @@
     overlay.querySelector('.card').addEventListener('click', armed(startPlay));
     const list = puzzle.pairs.map((pr) => pr.target);
     const spoken = list.length === 2 ? `${list[0]} and ${list[1]}` : `${list.slice(0, -1).join(', ')}, and ${list[list.length - 1]}`;
-    const rules = g.played < 3 ? ' Draw a path from a dot to the dot with the same color. The numbers on your path must add up to the number on the dot.' : '';
+    const rules = g.played < 3 ? ' Draw a path from a dot to the dot with the same color. The numbers on your path must add up to the number on the dot. The short way usually won\'t work, so add up the numbers and go around!' : '';
     MQ.Voice.say(`Level ${g.level}.${rules} Make ${spoken}.`, 'en-US', { interrupt: true });
     if (data.settings.chinese) MQ.Voice.say(list.map((v) => MQ.zhNumber(v)).join(','), 'zh-CN');
     say('Connect each pair of dots. Add up the numbers on the way!');
