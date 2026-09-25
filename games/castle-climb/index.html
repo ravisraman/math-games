@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Castle Climb</title>
+  <link rel="stylesheet" href="../../shared/style.css?v=5">
+  <link rel="stylesheet" href="game.css?v=5">
+</head>
+<body>
+  <main class="layout">
+    <div class="stage" id="stage">
+      <canvas id="board" aria-label="Castle Climb game board"></canvas>
+      <div class="overlay" id="overlay" hidden></div>
+    </div>
+
+    <aside class="panel">
+      <div class="panel-top">
+        <a class="home" href="../../index.html" title="Back to the portal">🏠</a>
+        <div class="level-pill">Level <span id="level">1</span></div>
+        <div class="star-pill">⭐ <span id="stars">0</span></div>
+      </div>
+
+      <section class="box problem-box">
+        <div class="label">🏮 Jump to the answer</div>
+        <div class="big" id="problem">—</div>
+        <div class="zh sub" id="problem-zh"></div>
+      </section>
+
+      <section class="box floor-box">
+        <div class="label">🏯 Floor <b id="floor">0</b> of 10</div>
+        <div class="track" id="track"></div>
+        <div class="tally" id="tally"></div>
+      </section>
+
+      <section class="bubble" id="bubble" aria-live="polite">
+        <span class="mascot">🐼</span>
+        <span id="message">Let's climb the tower!</span>
+      </section>
+
+      <section class="controls">
+        <div><span class="key">←</span><span class="key">→</span> walk under an answer</div>
+        <div><span class="key">↑</span> or <span class="key">space</span> jump up</div>
+        <div><span class="key">↓</span> hear it again · <span class="key">H</span> hint</div>
+        <div><span class="key">esc</span> pause · <span class="key">M</span> music on / off</div>
+      </section>
+    </aside>
+  </main>
+
+  <script src="../../shared/core.js?v=5"></script>
+  <script src="problems.js?v=5"></script>
+  <script src="game.js?v=5"></script>
+</body>
+</html>
