@@ -37,7 +37,7 @@
   function progressText(game) {
     const g = data.games[game.id];
     if (!g || !g.played) return '▶ New game!';
-    return `▶ Level ${g.level}`;
+    return `▶ Level ${Number(g.level) || 1}`;
   }
 
   function render() {
@@ -180,22 +180,24 @@
     const avgStars = recent.length ? (recent.reduce((s, h) => s + h.stars, 0) / recent.length).toFixed(1) : '—';
     const skills = skillsFor(game.id, g).map((s) => {
       if (!s.tries) return `<div class="skill"><span>${MQ.escapeHtml(s.label)}</span><div class="bar"><i style="width:0"></i></div><span class="muted">not yet</span></div>`;
-      const pct = Math.round((100 * s.right) / s.tries);
-      return `<div class="skill"><span>${MQ.escapeHtml(s.label)}</span><div class="bar"><i style="width:${pct}%"></i></div><span>${s.right}/${s.tries}</span></div>`;
+      const right = Math.max(0, Number(s.right) || 0);
+      const tries = Math.max(1, Number(s.tries) || 1);
+      const pct = Math.min(100, Math.round((100 * right) / tries));
+      return `<div class="skill"><span>${MQ.escapeHtml(s.label)}</span><div class="bar"><i style="width:${pct}%"></i></div><span>${right}/${tries}</span></div>`;
     }).join('');
     return `
       <div class="gp-card">
         <h3>${game.art[0]} ${game.name}</h3>
         <div class="gp-level">Level
           <button class="btn secondary small" data-level="${game.id}" data-delta="-1" aria-label="Level down">−</button>
-          <span id="gp-level-${game.id}">${g.level || 1}</span>
+          <span id="gp-level-${game.id}">${Number(g.level) || 1}</span>
           <button class="btn secondary small" data-level="${game.id}" data-delta="1" aria-label="Level up">+</button>
         </div>
-        <p>Played <b>${g.played || 0}</b> · Highest level <b>${g.maxLevel || 1}</b> · Avg ⭐ <b>${avgStars}</b> · ${minutes(g.seconds)}</p>
+        <p>Played <b>${Number(g.played) || 0}</b> · Highest level <b>${Number(g.maxLevel) || 1}</b> · Avg ⭐ <b>${avgStars}</b> · ${minutes(g.seconds)}</p>
         ${game.levels ? `<p class="muted">${game.levels}</p>` : ''}
         ${skills ? `<div class="skills">${skills}</div>` : ''}
         ${hist.length ? `<table class="hist"><tr><th>Level</th><th>Stars</th><th>Details</th></tr>
-          ${hist.map((h) => `<tr><td>${h.level}</td><td>${'⭐'.repeat(h.stars)}</td><td>${MQ.escapeHtml(summaryFor(game.id, h))}</td></tr>`).join('')}
+          ${hist.map((h) => `<tr><td>${Number(h.level) || ''}</td><td>${'⭐'.repeat(Math.max(0, Math.min(3, Number(h.stars) || 0)))}</td><td>${MQ.escapeHtml(summaryFor(game.id, h))}</td></tr>`).join('')}
         </table>` : '<p class="muted">Not played yet.</p>'}
       </div>`;
   }
@@ -230,7 +232,10 @@
       <p>Family sync code:</p>
       <div class="sync-code">${S.pretty(S.code)}</div>
       <p class="muted">On the other device, open Math Quest → ⚙️ Grown-ups → type this code under <b>Sync</b> → Join. On iPhone, do this inside the Home Screen app.</p>
-      <p class="muted">Last synced: <b id="sync-when">${ago(S.lastSync)}</b>${S.lastError ? ` · <span class="sync-err">offline — will retry</span>` : ''}</p>
+      <p class="muted">Last synced: <b id="sync-when">${ago(S.lastSync)}</b>${S.lastError === 'quota'
+        ? ` · <span class="sync-err">paused until tomorrow (free daily limit reached) — progress is kept on this device</span>`
+        : S.lastError ? ` · <span class="sync-err">offline — will retry</span>` : ''}</p>
+      <p class="muted">Name, stars and round history are stored in your own Cloudflare account under this code. Anyone with the code can see and change them, so share it only between your devices.</p>
       <div class="row" style="justify-content:flex-start">
         <button class="btn secondary small" id="sync-now">Sync now</button>
         <button class="btn secondary small" id="sync-copy">Copy code</button>
@@ -293,7 +298,7 @@
           <label><input type="checkbox" id="gp-voice" ${data.settings.voice ? 'checked' : ''}> Read questions aloud</label>
           <label><input type="checkbox" id="gp-chinese" ${data.settings.chinese ? 'checked' : ''}> Show numbers in Chinese too (四十七分, 三点半)</label>
           <p class="muted">Total play time: ${minutes(data.playSeconds)} · Stars: ${data.stars}</p>
-          ${MQ.isTouch && !MQ.isStandalone ? `<div class="install-tip">📱 <b>Make it an app:</b> in Safari tap the Share button (the square with an arrow ⬆), then <b>Add to Home Screen</b>. It opens full-screen and works offline.</div>` : ''}
+          ${MQ.isTouch && !MQ.isStandalone ? `<div class="install-tip">📱 <b>Make it an app:</b> in Safari tap the Share button (the square with an arrow ⬆), then <b>Add to Home Screen</b>. It opens full-screen and works offline. The app keeps its own progress, so after opening it, go to ⚙️ → Sync → Join with your family code.</div>` : ''}
           <p class="muted">Each game adapts on its own: it moves up after a great round and down after two hard ones. Use −/+ if a game feels too easy or too hard.</p>
         </div>
         <div class="gp-card sync-card" id="gp-sync">${syncCard()}</div>
@@ -364,6 +369,9 @@
     $('gp-import').addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
+      if (!confirm(MQ.Sync.code
+        ? 'Restore this backup? It replaces the progress on this device AND on every synced device.'
+        : 'Restore this backup? It replaces the progress on this device.')) { e.target.value = ''; return; }
       try {
         MQ.importText(await file.text());
         data = MQ.load();
@@ -376,7 +384,7 @@
       }
     });
     $('gp-reset').addEventListener('click', () => {
-      if (!confirm('Erase all progress, stars and heroes? (Tip: download a backup first.)')) return;
+      if (!confirm(MQ.Sync.code ? 'Erase all progress, stars and heroes on EVERY synced device? (Tip: download a backup first.)' : 'Erase all progress, stars and heroes? (Tip: download a backup first.)')) return;
       MQ.reset();
       data = MQ.load();
       render();

@@ -771,7 +771,8 @@
     const c = clockToScreen(CX, CY - R * 0.3);
     burst(c.x, c.y, '#ffe27a', 14);
     say(`${praise.zh} ${praise.en} ${floor >= FLOORS ? 'You reached the top!' : `Floor ${floor}!`}`);
-    if (data.settings.chinese) MQ.Voice.say(`${praise.zh} ${zhPart}`, 'zh-CN', { interrupt: true });
+    // Two short phrases: the praise is the same every time, so it is ready instantly after the first time.
+    if (data.settings.chinese) { MQ.Voice.say(praise.zh, 'zh-CN', { interrupt: true }); MQ.Voice.say(zhPart, 'zh-CN'); }
     else MQ.Voice.say(praise.en, 'en-US', { interrupt: true });
     autoNextAt = time + (q.wedge ? 2.6 : 1.8);
   }

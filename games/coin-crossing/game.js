@@ -473,7 +473,8 @@
     updateHud();
     if (now === target) {
       MQ.Sound.open();
-      say(`You made ${MQ.money(now, targetFmt)}! The castle gate is open — hop to the top! ⬆`, { speak: true });
+      say(`You made ${MQ.money(now, targetFmt)}! The castle gate is open — hop to the top! ⬆`);
+      MQ.Voice.say(`You made ${MQ.moneyWords(now)}! The castle gate is open. Hop to the top!`, 'en-US', { interrupt: true });
     } else {
       const left = coins.filter((c) => !c.taken).map((c) => c.v);
       if (!canMake(target - now, left)) {

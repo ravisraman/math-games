@@ -29,12 +29,18 @@
   }
 
   // ---------- Saving + syncing between devices ----------
-  // Each part of the save (player, settings, each game) carries a timestamp in data.stamps, so
-  // two devices can be merged: for each game the copy with more finished rounds wins (the newer
-  // one if tied); for the player name, hero and settings the newer one wins. Stars and play time are counted per device
-  // (starsBy / secondsBy) and added up, so progress made on both devices is never lost.
+  // Every part of the save carries a timestamp in data.stamps (player, each setting, each game),
+  // so two devices can be merged safely:
+  //  - games merge field by field: the copy with more finished rounds decides the current level,
+  //    while maxLevel / rounds played / skill tallies / time take the larger value and the round
+  //    histories are combined;
+  //  - each setting and the player (name + hero) take the newer value;
+  //  - stars and play time are counted per device (starsBy / secondsBy) and added up;
+  //  - "Start over" / "Restore backup" set resetAt: older progress from other devices is dropped,
+  //    anything played after it is kept.
   const SYNC_KEY = 'mathQuest.sync.v1';
   const CLOUD = 'https://math-quest.rraman.workers.dev';
+  const DAY = 86400000;
 
   function readJSON(key) {
     try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { return null; }
@@ -52,20 +58,62 @@
     return st;
   }
 
+  // Keep saves well-formed even if a copy was damaged or tampered with.
+  function sane(d) {
+    if (!d || typeof d !== 'object') return d;
+    const limit = Date.now() + DAY;
+    const clamp = (t) => { t = Number(t) || 0; return t > limit ? 0 : t; };
+    if (d.player && typeof d.player === 'object') {
+      if (!HEROES.some((h) => h.emoji === d.player.hero)) d.player.hero = '🐥';
+      d.player.name = String(d.player.name || '').slice(0, 20);
+    }
+    if (d.stamps && typeof d.stamps === 'object') {
+      d.stamps.player = clamp(d.stamps.player);
+      d.stamps.settings = clamp(d.stamps.settings);
+      for (const k of ['set', 'games']) {
+        const o = d.stamps[k];
+        if (o && typeof o === 'object') for (const id of Object.keys(o)) o[id] = clamp(o[id]);
+      }
+    }
+    d.resetAt = clamp(d.resetAt);
+    if (!d.games || typeof d.games !== 'object' || Array.isArray(d.games)) d.games = {};
+    // Numbers must be numbers (they end up on screen).
+    const num = (v, dflt = 0) => { const n = Number(v); return Number.isFinite(n) ? n : dflt; };
+    for (const [id, g] of Object.entries(d.games)) {
+      if (!g || typeof g !== 'object' || Array.isArray(g)) { delete d.games[id]; continue; }
+      for (const k of ['level', 'maxLevel']) if (k in g) g[k] = Math.max(1, Math.round(num(g[k], 1)));
+      for (const k of ['played', 'seconds', 'struggles', 'goodStreak']) if (k in g) g[k] = Math.max(0, num(g[k]));
+      if ('history' in g) {
+        g.history = (Array.isArray(g.history) ? g.history : []).filter((h) => h && typeof h === 'object').map((h) => ({
+          ...h, level: num(h.level, 1), stars: Math.max(0, Math.min(3, num(h.stars))), seconds: num(h.seconds), date: String(h.date || ''),
+        }));
+      }
+    }
+    for (const k of ['stars', 'playSeconds']) if (k in d) d[k] = Math.max(0, num(d[k]));
+    return d;
+  }
+
   function normalize(s) {
     const d = defaults();
-    return {
+    return sane({
       ...d,
       ...s,
       player: { ...d.player, ...(s.player || {}) },
       settings: { ...d.settings, ...(s.settings || {}) },
       games: s.games || {},
-    };
+    });
   }
 
+  // What counts as a change worth stamping/syncing: time spent alone doesn't.
+  function gameSig(g) {
+    if (!g || typeof g !== 'object') return JSON.stringify(g);
+    const { seconds, ...rest } = g;
+    return JSON.stringify(rest);
+  }
   function sections(d) {
-    const out = { player: JSON.stringify(d.player || {}), settings: JSON.stringify(d.settings || {}), games: {} };
-    for (const id of Object.keys(d.games || {})) out.games[id] = JSON.stringify(d.games[id]);
+    const out = { player: JSON.stringify(d.player || {}), settings: {}, games: {} };
+    for (const k of Object.keys(d.settings || {})) out.settings[k] = JSON.stringify(d.settings[k]);
+    for (const id of Object.keys(d.games || {})) out.games[id] = gameSig(d.games[id]);
     return out;
   }
 
@@ -79,12 +127,16 @@
   }
 
   let snapshot = null; // what this page last loaded/saved, to spot which parts changed
+  let live = null; // the data object this page got from load(); kept up to date in place
+  let base = { stars: 0, seconds: 0 }; // totals this page last saw, to count only its own progress
   let savedSinceLoad = false;
 
   function load() {
     const s = readJSON(KEY);
-    const data = s ? normalize(s) : defaults();
+    const data = ensureCounters(s ? normalize(s) : defaults());
     snapshot = sections(data);
+    base = { stars: Number(data.stars) || 0, seconds: Number(data.playSeconds) || 0 };
+    live = data;
     return data;
   }
 
@@ -95,6 +147,10 @@
     const last = h && h.length && Date.parse(h[h.length - 1].date);
     return last || 0;
   }
+  function settingTime(d, key) {
+    const st = d.stamps || {};
+    return (st.set && st.set[key]) || st.settings || 0;
+  }
 
   function sumValues(o) { return Object.values(o || {}).reduce((a, v) => a + (Number(v) || 0), 0); }
 
@@ -104,76 +160,151 @@
     return out;
   }
 
-  // Combine two saves (b wins ties).
+  const histKey = (h) => `${h && h.date}|${h && h.level}|${h && h.stars}`;
+
+  // Skill tallies ({key: {right, tries, ...}}): keep the entry with more tries for each key.
+  function mergeTallies(a, b) {
+    const out = { ...(a || {}) };
+    for (const [k, v] of Object.entries(b || {})) {
+      const o = out[k];
+      if (!o || (Number(v && v.tries) || 0) >= (Number(o.tries) || 0)) out[k] = v;
+    }
+    return out;
+  }
+
+  function mergeGame(ga, gb, ta, tb) {
+    const pa = Number(ga.played) || 0;
+    const pb = Number(gb.played) || 0;
+    // The copy with more finished rounds decides the current level (newer one if tied).
+    const win = pa > pb || (pa === pb && ta > tb) ? ga : gb;
+    const out = { ...win };
+    let union = null;
+    if (Array.isArray(ga.history) || Array.isArray(gb.history)) {
+      const seen = new Set();
+      union = [...(ga.history || []), ...(gb.history || [])]
+        .filter((h) => { const k = histKey(h); if (seen.has(k)) return false; seen.add(k); return true; })
+        .sort((x, y) => String(x.date).localeCompare(String(y.date)));
+      out.history = union.slice(-200);
+    }
+    out.played = Math.max(pa, pb, union && union.length < 200 ? union.length : 0);
+    if ('maxLevel' in ga || 'maxLevel' in gb) out.maxLevel = Math.max(Number(ga.maxLevel) || 0, Number(gb.maxLevel) || 0, Number(out.level) || 0);
+    if ('seconds' in ga || 'seconds' in gb) out.seconds = Math.max(Number(ga.seconds) || 0, Number(gb.seconds) || 0);
+    for (const k of ['quiz', 'skills']) if (ga[k] || gb[k]) out[k] = mergeTallies(ga[k], gb[k]);
+    return out;
+  }
+
+  // Drop the parts of a save that were made before a "start over" elsewhere.
+  function sinceReset(d, resetAt) {
+    const out = { ...d, games: {}, player: undefined, settings: {}, starsBy: {}, secondsBy: {}, stamps: { player: 0, set: {}, games: {} } };
+    const st = d.stamps || {};
+    for (const id of Object.keys(d.games || {})) {
+      const t = gameTime(d, id);
+      if (t > resetAt) { out.games[id] = d.games[id]; out.stamps.games[id] = t; }
+    }
+    if ((st.player || 0) > resetAt) { out.player = d.player; out.stamps.player = st.player; }
+    for (const k of Object.keys(d.settings || {})) {
+      const t = settingTime(d, k);
+      if (t > resetAt) { out.settings[k] = d.settings[k]; out.stamps.set[k] = t; }
+    }
+    out.resetAt = resetAt;
+    return out;
+  }
+
+  // Combine two saves (b wins exact ties).
   function merge(a, b) {
     if (!a) return b;
     if (!b) return a;
-    // A "start over" on one device wipes older progress everywhere.
-    if ((a.resetAt || 0) !== (b.resetAt || 0)) return (a.resetAt || 0) > (b.resetAt || 0) ? a : b;
+    a = sane(a);
+    b = sane(b);
+    const ra = a.resetAt || 0;
+    const rb = b.resetAt || 0;
+    if (ra > rb) b = sinceReset(b, ra);
+    else if (rb > ra) a = sinceReset(a, rb);
     const sa = a.stamps || {};
     const sb = b.stamps || {};
-    const out = { ...a, ...b, stamps: { player: 0, settings: 0, games: {} } };
-    for (const part of ['player', 'settings']) {
-      const useA = (sa[part] || 0) > (sb[part] || 0);
-      out[part] = useA ? a[part] : b[part];
-      out.stamps[part] = Math.max(sa[part] || 0, sb[part] || 0);
+    const out = { ...a, ...b, resetAt: Math.max(ra, rb), stamps: { player: 0, settings: 0, set: {}, games: {} } };
+    // Player (name + hero) as one piece; the newer one wins.
+    const pA = a.player ? sa.player || 0 : -Infinity;
+    const pB = b.player ? sb.player || 0 : -Infinity;
+    out.player = pA > pB ? a.player : b.player || a.player;
+    out.stamps.player = Math.max(sa.player || 0, sb.player || 0);
+    // Each setting on its own; the newer one wins.
+    out.settings = {};
+    for (const k of new Set([...Object.keys(a.settings || {}), ...Object.keys(b.settings || {})])) {
+      const inA = a.settings && k in a.settings;
+      const inB = b.settings && k in b.settings;
+      const tA = settingTime(a, k);
+      const tB = settingTime(b, k);
+      out.settings[k] = inA && (!inB || tA > tB) ? a.settings[k] : b.settings[k];
+      out.stamps.set[k] = Math.max(inA ? tA : 0, inB ? tB : 0);
     }
     out.games = {};
-    const ids = new Set([...Object.keys(a.games || {}), ...Object.keys(b.games || {})]);
-    for (const id of ids) {
+    for (const id of new Set([...Object.keys(a.games || {}), ...Object.keys(b.games || {})])) {
       const ga = a.games && a.games[id];
       const gb = b.games && b.games[id];
-      if (!ga || !gb) { out.games[id] = ga || gb; out.stamps.games[id] = gameTime(ga ? a : b, id); continue; }
-      const ta = gameTime(a, id);
-      const tb = gameTime(b, id);
-      // The copy with more finished rounds wins; if equal (e.g. a grown-up changed the level), the newer one.
-      const pa = Number(ga.played) || 0;
-      const pb = Number(gb.played) || 0;
-      let win = gb;
-      if (pa > pb || (pa === pb && ta > tb)) win = ga;
-      const merged = { ...win };
-      // Keep every finished round from both devices in the history.
-      if (Array.isArray(ga.history) || Array.isArray(gb.history)) {
-        const seen = new Set();
-        merged.history = [...(ga.history || []), ...(gb.history || [])]
-          .filter((h) => { const k = `${h.date}|${h.level}|${h.stars}`; if (seen.has(k)) return false; seen.add(k); return true; })
-          .sort((x, y) => String(x.date).localeCompare(String(y.date)))
-          .slice(-200);
-      }
-      out.games[id] = merged;
+      const ta = ga ? gameTime(a, id) : 0;
+      const tb = gb ? gameTime(b, id) : 0;
+      out.games[id] = !ga || !gb ? ga || gb : mergeGame(ga, gb, ta, tb);
       out.stamps.games[id] = Math.max(ta, tb);
     }
     out.starsBy = maxMerge(a.starsBy, b.starsBy);
     out.secondsBy = maxMerge(a.secondsBy, b.secondsBy);
-    if (Object.keys(out.starsBy).length) out.stars = sumValues(out.starsBy);
-    if (Object.keys(out.secondsBy).length) out.playSeconds = sumValues(out.secondsBy);
+    out.stars = Object.keys(out.starsBy).length ? sumValues(out.starsBy) : Number(b.stars) || 0;
+    out.playSeconds = Object.keys(out.secondsBy).length ? sumValues(out.secondsBy) : Number(b.playSeconds) || 0;
     return out;
   }
 
-  function stamp(data) {
+  function stamp(data, stored) {
     const now = Date.now();
     const snap = snapshot || sections(defaults());
     const cur = sections(data);
-    data.stamps = data.stamps || { player: 0, settings: 0, games: {} };
+    data.stamps = data.stamps || {};
     data.stamps.games = data.stamps.games || {};
+    data.stamps.set = data.stamps.set || {};
     if (cur.player !== snap.player) data.stamps.player = now;
-    if (cur.settings !== snap.settings) data.stamps.settings = now;
+    for (const k of Object.keys(cur.settings)) if (cur.settings[k] !== snap.settings[k]) data.stamps.set[k] = now;
     for (const id of Object.keys(cur.games)) if (cur.games[id] !== snap.games[id]) data.stamps.games[id] = now;
+    // Credit only what this page earned since it last looked (so two tabs never undo each other).
     const dev = syncState().device;
-    for (const [total, by] of [['stars', 'starsBy'], ['playSeconds', 'secondsBy']]) {
-      data[by] = data[by] || {};
-      const others = sumValues(data[by]) - (Number(data[by][dev]) || 0);
-      data[by][dev] = Math.max(Number(data[by][dev]) || 0, (Number(data[total]) || 0) - others);
+    const prev = ensureCounters(stored ? { ...stored } : { stars: base.stars, playSeconds: base.seconds });
+    data.starsBy = { ...(data.starsBy || {}) };
+    data.secondsBy = { ...(data.secondsBy || {}) };
+    data.starsBy[dev] = Math.max(0, (Number(prev.starsBy[dev]) || 0) + (Number(data.stars) || 0) - base.stars);
+    data.secondsBy[dev] = Math.max(0, (Number(prev.secondsBy[dev]) || 0) + (Number(data.playSeconds) || 0) - base.seconds);
+  }
+
+  // Bring newer values (e.g. from the other device) into the page's own data object in place, so
+  // games holding references to data / data.games[id] see them and don't overwrite them later.
+  function applyToLive(merged) {
+    if (!live || !merged) return;
+    // A "start over" arrived: forget the games it removed, or this page would bring them back.
+    if ((merged.resetAt || 0) !== (live.resetAt || 0) && live.games) {
+      for (const id of Object.keys(live.games)) if (!merged.games || !(id in merged.games)) delete live.games[id];
     }
-    snapshot = cur;
+    live.player = live.player || {};
+    Object.assign(live.player, merged.player || {});
+    live.settings = live.settings || {};
+    Object.assign(live.settings, merged.settings || {});
+    live.games = live.games || {};
+    for (const [id, g] of Object.entries(merged.games || {})) {
+      if (live.games[id] && typeof live.games[id] === 'object') Object.assign(live.games[id], g);
+      else live.games[id] = g;
+    }
+    for (const k of ['stars', 'playSeconds', 'starsBy', 'secondsBy', 'stamps', 'resetAt']) live[k] = merged[k];
+    snapshot = sections(live);
+    base = { stars: Number(live.stars) || 0, seconds: Number(live.playSeconds) || 0 };
+    try { applySettings(live.settings); } catch (e) { /* ignore */ }
   }
 
   function save(data) {
     try {
-      stamp(data);
-      const merged = merge(readJSON(KEY), data);
+      const stored = readJSON(KEY);
+      stamp(data, stored);
+      const merged = merge(stored, data);
       localStorage.setItem(KEY, JSON.stringify(merged));
       savedSinceLoad = true;
+      if (data === live || !live) { live = data; applyToLive(merged); }
+      else { snapshot = sections(data); base = { stars: Number(data.stars) || 0, seconds: Number(data.playSeconds) || 0 }; }
       Sync.schedule();
       return true;
     } catch (e) {
@@ -197,34 +328,58 @@
     if (!s || typeof s !== 'object' || typeof s.games !== 'object') {
       throw new Error('That file does not look like Math Quest progress.');
     }
-    // An imported backup should win over whatever is on this device or in the cloud.
+    // A restored backup replaces the progress on every synced device (like "start over" + restore).
     const now = Date.now();
-    s.stamps = { player: now, settings: now, games: {} };
-    for (const id of Object.keys(s.games)) s.stamps.games[id] = now;
-    s.starsBy = { [syncState().device]: Number(s.stars) || 0 };
-    s.secondsBy = { [syncState().device]: Number(s.playSeconds) || 0 };
-    s.resetAt = now;
-    localStorage.setItem(KEY, JSON.stringify(s));
-    snapshot = sections(normalize(s));
-    Sync.push(true);
+    const d = normalize(s);
+    d.stamps = { player: now, set: {}, games: {} };
+    for (const k of Object.keys(d.settings)) d.stamps.set[k] = now;
+    for (const id of Object.keys(d.games)) d.stamps.games[id] = now;
+    d.starsBy = { [syncState().device]: Number(d.stars) || 0 };
+    d.secondsBy = { [syncState().device]: Number(d.playSeconds) || 0 };
+    d.resetAt = now - 1;
+    writeJSON(KEY, d);
+    snapshot = sections(d);
+    base = { stars: Number(d.stars) || 0, seconds: Number(d.playSeconds) || 0 };
+    live = null;
+    Sync.dirty = true;
+    Sync.now();
   }
 
   function reset() {
-    const fresh = { ...defaults(), resetAt: Date.now(), stamps: { player: 0, settings: 0, games: {} } };
+    const fresh = { ...defaults(), resetAt: Date.now(), stamps: { player: 0, set: {}, games: {} }, starsBy: {}, secondsBy: {} };
     writeJSON(KEY, fresh);
     snapshot = sections(fresh);
-    Sync.push(true);
+    base = { stars: 0, seconds: 0 };
+    live = null;
+    Sync.dirty = true;
+    Sync.now();
   }
 
   // Talks to the family's copy in the cloud (a small Cloudflare Worker + KV store).
+  // To stay well inside the free plan's daily write limit, meaningful changes (a finished round,
+  // a level/setting/hero change) are sent within a few seconds; play time alone at most every
+  // 5 minutes; and whatever is pending is sent when the app goes to the background.
   const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const TIME_ONLY_EVERY = 5 * 60 * 1000;
+
+  function pushSig(d) {
+    if (!d) return '';
+    const s = sections(d);
+    return JSON.stringify([s.player, s.settings, s.games, d.starsBy, d.resetAt]);
+  }
+
   const Sync = {
     timer: null,
     busy: null,
     listeners: [],
+    dirty: false,
+    lastRemote: undefined,
+    lastSig: null,
+    lastPushAt: 0,
     get code() { return syncState().code || null; },
     get lastSync() { return syncState().lastSync || 0; },
     get lastError() { return syncState().lastError || ''; },
+    get pausedUntil() { return syncState().pausedUntil || 0; },
     pretty(code) { return (code || '').replace(/(.{4})(?=.)/g, '$1-'); },
     newCode() {
       const bytes = new Uint8Array(12);
@@ -235,35 +390,67 @@
     setState(patch) { writeJSON(SYNC_KEY, { ...syncState(), ...patch }); },
     onChange(fn) { this.listeners.push(fn); },
     emit(info) { this.listeners.forEach((fn) => { try { fn(info); } catch (e) { /* ignore */ } }); },
-    async request(method, body, keepalive = false) {
-      const res = await fetch(`${CLOUD}/sync/${this.code}`, {
-        method,
-        headers: body ? { 'Content-Type': 'application/json' } : undefined,
-        body,
-        keepalive,
-        cache: 'no-store',
-      });
-      if (!res.ok) throw new Error(`sync ${method} ${res.status}`);
-      return res.json();
+    usable() {
+      return !!this.code && /^https?:$/.test(location.protocol) && navigator.onLine !== false && Date.now() >= this.pausedUntil;
+    },
+    async request(method, body, { keepalive = false, timeout = 8000 } = {}) {
+      const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const t = ctl ? setTimeout(() => ctl.abort(), timeout) : null;
+      try {
+        const res = await fetch(`${CLOUD}/sync/${this.code}`, {
+          method,
+          headers: body ? { 'Content-Type': 'application/json' } : undefined,
+          body,
+          keepalive: keepalive && (!body || body.length < 60000),
+          cache: 'no-store',
+          signal: ctl ? ctl.signal : undefined,
+        });
+        if (!res.ok) {
+          const err = new Error(`sync ${method} ${res.status}`);
+          err.status = res.status;
+          throw err;
+        }
+        return res.json();
+      } finally {
+        if (t) clearTimeout(t);
+      }
     },
     // Pull the cloud copy, merge it with this device, save both ways.
-    async now({ force = false } = {}) {
-      if (!this.code || !/^https?:$/.test(location.protocol) || navigator.onLine === false) return null;
+    async now({ background = false } = {}) {
+      if (!this.usable()) return null;
       if (this.busy) return this.busy;
+      clearTimeout(this.timer);
+      this.timer = null;
       this.busy = (async () => {
         try {
-          const remote = await this.request('GET');
-          const local = ensureCounters(readJSON(KEY));
-          const merged = force ? local : merge(remote, local);
-          const before = JSON.stringify(sections(normalize(local || defaults())));
+          const remote = await this.request('GET', undefined, { timeout: background ? 4000 : 8000 });
+          this.lastRemote = remote;
+          const local = ensureCounters(readJSON(KEY) || defaults());
+          const merged = merge(remote, local);
+          const before = JSON.stringify(sections(normalize(local)));
           writeJSON(KEY, merged);
-          if (JSON.stringify(merged) !== JSON.stringify(remote)) await this.request('PUT', JSON.stringify(merged));
+          if (JSON.stringify(merged) !== JSON.stringify(remote)) {
+            const body = JSON.stringify(merged);
+            await this.request('PUT', body, { keepalive: document.hidden });
+            this.lastRemote = merged;
+          }
+          this.dirty = false;
+          this.lastSig = pushSig(merged);
+          this.lastPushAt = Date.now();
           this.setState({ lastSync: Date.now(), lastError: '' });
-          const changed = JSON.stringify(sections(normalize(merged || defaults()))) !== before;
+          const changed = JSON.stringify(sections(normalize(merged))) !== before;
+          if (changed) applyToLive(merged);
           this.emit({ changed });
           return { changed };
         } catch (e) {
-          this.setState({ lastError: String(e.message || e) });
+          // A daily limit on the free plan: stop trying until tomorrow (UTC) instead of hammering.
+          if (e && (e.status === 429 || e.status === 503)) {
+            const tomorrow = new Date();
+            tomorrow.setUTCHours(24, 5, 0, 0);
+            this.setState({ lastError: 'quota', pausedUntil: tomorrow.getTime() });
+          } else {
+            this.setState({ lastError: String((e && e.message) || e) });
+          }
           this.emit({ error: true });
           return null;
         } finally {
@@ -274,13 +461,28 @@
     },
     schedule() {
       if (!this.code) return;
+      this.dirty = true;
+      const local = readJSON(KEY);
+      const important = pushSig(local) !== this.lastSig;
+      if (!important && Date.now() - this.lastPushAt < TIME_ONLY_EVERY) return; // time-only: later
+      if (document.hidden) { this.now({ background: true }); return; }
       clearTimeout(this.timer);
-      this.timer = setTimeout(() => this.now(), 2500);
+      this.timer = setTimeout(() => { this.timer = null; this.now(); }, 2500);
     },
-    push(force = false) { if (this.code) this.now({ force }); },
+    // Last chance when the page is going away: send the merged copy without waiting for an answer.
+    flush() {
+      if (!this.code || !this.dirty || this.busy || !this.usable()) return;
+      try {
+        const local = ensureCounters(readJSON(KEY) || defaults());
+        const body = JSON.stringify(this.lastRemote ? merge(this.lastRemote, local) : local);
+        if (body.length >= 60000) return;
+        this.request('PUT', body, { keepalive: true }).then(() => { this.dirty = false; }).catch(() => {});
+      } catch (e) { /* ignore */ }
+    },
     async start() {
       const code = this.newCode();
-      this.setState({ code });
+      this.setState({ code, pausedUntil: 0, lastError: '' });
+      this.dirty = true;
       await this.now();
       return code;
     },
@@ -288,25 +490,53 @@
       const c = this.clean(code);
       if (c.length < 12) throw new Error('That code looks too short.');
       const prev = this.code;
-      this.setState({ code: c });
-      const res = await fetch(`${CLOUD}/sync/${c}`, { cache: 'no-store' }).then((r) => r.json()).catch(() => undefined);
+      this.setState({ code: c, pausedUntil: 0, lastError: '' });
+      let res;
+      try { res = await this.request('GET'); } catch (e) { res = undefined; }
       if (res === undefined) { this.setState({ code: prev }); throw new Error('Could not reach the sync service. Check the internet connection.'); }
       if (res === null) { this.setState({ code: prev }); throw new Error('No saved progress found for that code. Check for typos.'); }
-      // Joining a family adopts its name, hero and settings (this device's progress still merges in).
-      const local = ensureCounters(readJSON(KEY) || defaults());
-      local.stamps = { ...(local.stamps || {}), player: -1, settings: -1 };
+      const family = sane(res);
+      const local = ensureCounters(normalize(readJSON(KEY) || defaults()));
+      // Adopt the family's "start over" point, so neither side wipes the other just for joining.
+      local.resetAt = family.resetAt || 0;
+      if (!local.resetAt) delete local.resetAt;
+      // Adopt the family's name, hero and settings; this device's game progress still merges in.
+      local.stamps = { ...(local.stamps || {}), player: -1, settings: -1, set: {} };
+      // If this device's progress was copied from the family (a backup file), don't count those
+      // stars twice: credit this device only with rounds the family doesn't already have.
+      const familyRounds = new Set();
+      for (const g of Object.values(family.games || {})) for (const h of (g && g.history) || []) familyRounds.add(histKey(h));
+      let shared = 0;
+      let extraStars = 0;
+      let extraSeconds = 0;
+      for (const g of Object.values(local.games || {})) {
+        for (const h of (g && g.history) || []) {
+          if (familyRounds.has(histKey(h))) shared++;
+          else { extraStars += Number(h.stars) || 0; extraSeconds += Number(h.seconds) || 0; }
+        }
+      }
+      if (shared > 0) {
+        const dev = syncState().device;
+        local.starsBy = { [dev]: extraStars };
+        local.secondsBy = { [dev]: extraSeconds };
+      }
       writeJSON(KEY, local);
+      this.dirty = true;
+      live = null;
       await this.now();
       return c;
     },
-    stop() { this.setState({ code: null, lastSync: 0 }); },
+    stop() { this.setState({ code: null, lastSync: 0, pausedUntil: 0, lastError: '' }); },
   };
 
-  // Sync when a page opens and whenever the app comes back to the front.
-  // If newer progress arrives before this page saved anything, reload so the game uses it.
+  // Sync when a page opens and whenever the app comes back to the front. If newer progress
+  // arrives before the child has touched anything, reload so the game starts from it; otherwise
+  // it has already been merged into the page's data in place.
   function autoSync() {
-    Sync.now().then((r) => {
-      if (!r || !r.changed || savedSinceLoad || Sync.listeners.length) return;
+    Sync.now({ background: true }).then((r) => {
+      if (!r || !r.changed || Sync.listeners.length) return;
+      const touched = (navigator.userActivation && navigator.userActivation.hasBeenActive) || savedSinceLoad;
+      if (touched) return;
       const last = Number(sessionStorage.getItem('mq.syncReload') || 0);
       if (Date.now() - last < 15000) return;
       sessionStorage.setItem('mq.syncReload', String(Date.now()));
@@ -314,14 +544,12 @@
     });
   }
   setTimeout(autoSync, 50);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) autoSync(); });
-  window.addEventListener('online', () => Sync.now());
-  window.addEventListener('pagehide', () => {
-    if (!Sync.timer || !Sync.code) return;
-    clearTimeout(Sync.timer);
-    Sync.timer = null;
-    try { Sync.request('PUT', localStorage.getItem(KEY), true).catch(() => {}); } catch (e) { /* ignore */ }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { if (Sync.dirty) Sync.now({ background: true }); }
+    else autoSync();
   });
+  window.addEventListener('online', () => autoSync());
+  window.addEventListener('pagehide', () => Sync.flush());
 
   function unlockedHeroes(stars) {
     return HEROES.filter((h) => stars >= h.stars);
@@ -387,7 +615,7 @@
     unlock() {
       const ctx = this.init();
       if (!ctx) return;
-      if (ctx.state === 'suspended') ctx.resume();
+      if (ctx.state !== 'running' && ctx.state !== 'closed') { try { ctx.resume(); } catch (e) { /* ignore */ } }
       if (!this.unlocked) {
         this.unlocked = true;
         // iOS Safari only fully unlocks audio after something is played inside a touch/click.
@@ -725,6 +953,10 @@
       if (!Audio.ctx || !this.song) return;
       const g = Audio.music.gain;
       const t = Audio.ctx.currentTime;
+      // Overlapping ducks (e.g. a spoken sentence during the win tune) combine: deepest and longest wins.
+      if (this.duckEnd > t) { amount = Math.min(amount, this.duckAmt); seconds = Math.max(seconds, this.duckEnd - t); }
+      this.duckEnd = t + seconds;
+      this.duckAmt = amount;
       g.cancelScheduledValues(t);
       g.setValueAtTime(g.value, t);
       g.linearRampToValueAtTime(this.level * amount, t + 0.3);
@@ -761,6 +993,7 @@
     _stopNow() {
       clearInterval(this.timer);
       this.timer = null;
+      this.duckEnd = 0;
       if (this.song && Audio.ctx) {
         const g = Audio.music.gain;
         const t = Audio.ctx.currentTime;
@@ -773,7 +1006,10 @@
   };
 
   // Browsers only allow sound after the first key press or click.
-  ['keydown', 'pointerdown', 'touchend', 'click'].forEach((type) => window.addEventListener(type, () => Audio.unlock(), { capture: true }));
+  ['keydown', 'pointerdown', 'touchend', 'click'].forEach((type) => window.addEventListener(type, () => {
+    Audio.unlock();
+    if (type !== 'pointerdown') Voice.prime();
+  }, { capture: true }));
 
   // ---------- Device: phones/tablets get touch controls; laptops keep the keyboard ----------
   const isTouch = (() => {
@@ -796,6 +1032,7 @@
     }
   } catch (e) { /* ignore */ }
   document.addEventListener('visibilitychange', () => {
+    if (document.hidden) Voice.stop();
     if (!Audio.ctx) return;
     if (document.hidden) Audio.ctx.suspend();
     else Audio.ctx.resume();
@@ -825,7 +1062,8 @@
     if (ROBOT_VOICES.test(v.name)) return -1;
     let score = 0;
     if (have === want) score += 20;
-    if (want === 'zh-cn' && /tw|hk/.test(have)) score -= 15;
+    if (want === 'zh-cn' && /hk|mo|yue/.test(have)) return -1; // Cantonese voices can't read Mandarin text
+    if (want === 'zh-cn' && /tw/.test(have)) score -= 15;
     if (/Premium/i.test(v.name)) score += 100;
     if (/Enhanced|Neural|Natural/i.test(v.name)) score += 80;
     if (/Ava|Zoe|Allison|Susan|Evan|Nathan|Joelle|Noelle|Samantha|Lili|Tingting|Yu-shu|Li-mu/i.test(v.name)) score += 15;
@@ -844,7 +1082,22 @@
     gen: 0,
     source: null,
     cancelWait: null,
+    sysDone: null,
+    primed: false,
+    cloudDownUntil: 0,
+    cloudNote: '',
     cache: new Map(),
+
+    // iOS only lets speech start inside a tap/click/key press: speak a silent phrase on the first one.
+    prime() {
+      if (this.primed || !('speechSynthesis' in window)) return;
+      try {
+        const u = new SpeechSynthesisUtterance(' ');
+        u.volume = 0;
+        speechSynthesis.speak(u);
+        this.primed = true;
+      } catch (e) { /* ignore */ }
+    },
 
     voiceFor(lang) {
       try {
@@ -862,6 +1115,10 @@
 
     // Name of the voice that will be used, for the grown-ups corner.
     describe(lang = 'en-US') {
+      if (this.natural && this.cloudNote && !this.cloudOk()) {
+        const v = this.voiceFor(lang);
+        return `${v ? v.name : 'device voice'} (${this.cloudNote})`;
+      }
       if (this.cloudOk()) {
         if (lang.toLowerCase().startsWith('zh')) return 'Natural Chinese voice (MeloTTS)';
         const v = NATURAL_VOICES.find((x) => x.id === this.speaker);
@@ -872,7 +1129,20 @@
     },
 
     cloudOk() {
-      return this.natural && /^https?:$/.test(location.protocol) && navigator.onLine !== false;
+      return this.natural && /^https?:$/.test(location.protocol) && navigator.onLine !== false && Date.now() >= this.cloudDownUntil;
+    },
+
+    // After a failure, use the device voice for a while instead of making every sentence wait.
+    cloudTrouble(kind) {
+      if (kind === 'quota') {
+        const tomorrow = new Date();
+        tomorrow.setUTCHours(24, 5, 0, 0);
+        this.cloudDownUntil = tomorrow.getTime();
+        this.cloudNote = "today's natural-voice allowance is used up";
+      } else {
+        this.cloudDownUntil = Date.now() + 60000;
+        this.cloudNote = '';
+      }
     },
 
     clean(text) {
@@ -887,7 +1157,7 @@
       text = this.clean(text);
       if (!this.enabled || !text) return;
       if (interrupt) this.stop();
-      const item = { text, lang, gen: this.gen };
+      const item = { text, lang, gen: this.gen, deadline: Date.now() + CLOUD_WAIT_MS };
       if (this.cloudOk()) item.audio = this.fetchAudio(text, lang);
       this.queue.push(item);
       this.pump();
@@ -899,7 +1169,15 @@
       if (this.cache.has(key)) return this.cache.get(key);
       const url = `${CLOUD}/tts?lang=${zh ? 'zh' : 'en'}&voice=${encodeURIComponent(this.speaker)}&text=${encodeURIComponent(text)}`;
       const p = fetch(url)
-        .then((r) => { if (!r.ok) throw new Error('tts ' + r.status); return r.arrayBuffer(); })
+        .then(async (r) => {
+          if (!r.ok) {
+            const body = await r.text().catch(() => '');
+            const quota = r.status === 429 || r.status === 503 || /allocation|quota|limit|4006/i.test(body);
+            this.cloudTrouble(quota ? 'quota' : 'error');
+            throw new Error('tts ' + r.status);
+          }
+          return r.arrayBuffer();
+        })
         .then((buf) => {
           const ctx = Audio.init();
           if (!ctx) throw new Error('no audio');
@@ -908,7 +1186,7 @@
             if (r && r.catch) r.catch(() => {}); // newer browsers also return a promise
           });
         })
-        .catch(() => { this.cache.delete(key); return null; });
+        .catch(() => { this.cache.delete(key); if (Date.now() >= this.cloudDownUntil) this.cloudTrouble('error'); return null; });
       this.cache.set(key, p);
       if (this.cache.size > 150) this.cache.delete(this.cache.keys().next().value);
       return p;
@@ -923,15 +1201,19 @@
         let buffer = null;
         if (item.audio && item.gen === this.gen) {
           const cancelled = new Promise((resolve) => { this.cancelWait = resolve; });
-          buffer = await Promise.race([item.audio, cancelled, new Promise((r) => setTimeout(() => r(null), CLOUD_WAIT_MS))]);
+          const wait = Math.max(0, item.deadline - Date.now());
+          let timedOut = false;
+          buffer = await Promise.race([item.audio, cancelled, new Promise((r) => setTimeout(() => { timedOut = true; r(null); }, wait))]);
           this.cancelWait = null;
+          if (timedOut && !buffer) this.cloudTrouble('error');
         }
-        if (item.gen === this.gen) {
+        if (item.gen === this.gen && !document.hidden) {
           const ctx = Audio.ctx;
-          if (buffer && ctx) {
-            if (ctx.state === 'suspended') { try { await ctx.resume(); } catch (e) { /* ignore */ } }
+          if (buffer && ctx && ctx.state !== 'running' && ctx.state !== 'closed') {
+            try { await ctx.resume(); } catch (e) { /* ignore */ }
           }
-          if (buffer && ctx && ctx.state === 'running') await this.playBuffer(buffer);
+          if (item.gen !== this.gen) { /* interrupted while waiting — say nothing */ }
+          else if (buffer && ctx && ctx.state === 'running') await this.playBuffer(buffer);
           else await this.systemSay(item.text, item.lang);
         }
       } catch (e) { /* ignore */ }
@@ -947,7 +1229,7 @@
         src.connect(Audio.master);
         let finished = false;
         const done = () => { if (finished) return; finished = true; clearTimeout(guard); if (this.source === src) this.source = null; resolve(); };
-        const guard = setTimeout(done, buffer.duration * 1000 + 1500);
+        const guard = setTimeout(() => { try { src.stop(); } catch (e) { /* ignore */ } done(); }, buffer.duration * 1000 + 1500);
         src.onended = done;
         this.source = src;
         this.sourceDone = done;
@@ -966,8 +1248,9 @@
           u.pitch = 1.05;
           const v = this.voiceFor(lang);
           if (v) u.voice = v;
-          const done = () => { clearTimeout(t); resolve(); };
+          const done = () => { clearTimeout(t); if (this.sysDone === done) this.sysDone = null; resolve(); };
           const t = setTimeout(done, 1500 + text.length * 120);
+          this.sysDone = done;
           u.onend = done;
           u.onerror = done;
           speechSynthesis.speak(u);
@@ -986,6 +1269,7 @@
         if (done) done();
       }
       try { speechSynthesis.cancel(); } catch (e) { /* ignore */ }
+      if (this.sysDone) { const d = this.sysDone; this.sysDone = null; d(); }
     },
   };
   try {
@@ -1082,5 +1366,6 @@
     Audio, Sound, Music, Voice, Sync, applySettings,
     cents, dollars, money, moneyWords, zhNumber, zhMoney,
     PRAISE, CHEER, pick, escapeHtml, isTouch, isStandalone,
+    get _live() { return live; }, // for automated tests
   };
 })();
