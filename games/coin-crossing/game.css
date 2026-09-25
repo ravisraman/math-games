@@ -24,7 +24,7 @@ body { background: linear-gradient(180deg, #bfe8ff 0%, #e8f7ff 100%); }
   flex: none;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   max-height: 100%;
 }
 
@@ -54,7 +54,7 @@ body { background: linear-gradient(180deg, #bfe8ff 0%, #e8f7ff 100%); }
   box-shadow: 0 3px 0 #cbd9e6;
 }
 .label { font-size: 15px; font-weight: 700; color: var(--muted); }
-.big { font-size: 46px; font-weight: 900; line-height: 1.1; }
+.big { font-size: 40px; font-weight: 900; line-height: 1.1; }
 .target-box .big { color: #b3471a; }
 .sub { font-size: 18px; color: var(--muted); min-height: 1.2em; }
 .pouch-coins {
@@ -78,7 +78,7 @@ body { background: linear-gradient(180deg, #bfe8ff 0%, #e8f7ff 100%); }
   padding: 10px 12px;
   font-size: 18px;
   font-weight: 700;
-  min-height: 84px;
+  min-height: 72px;
 }
 .bubble .mascot { font-size: 34px; line-height: 1; }
 .bubble.pop { animation: pop 0.3s ease-out; }

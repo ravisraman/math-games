@@ -3,14 +3,18 @@
 (function () {
   'use strict';
 
-  const COLS = 9;
-  const ROWS = 11;
+  // Wide board sized for a 13" laptop screen. Row 0 is the (tall) castle, the last row is the start.
+  const COLS = 13;
+  const ROWS = 10;
   const CELL = 64;
+  const CASTLE_H = 160;
   const W = COLS * CELL;
-  const H = ROWS * CELL;
+  const H = CASTLE_H + (ROWS - 1) * CELL;
   const BANK_ROW = 0;
   const START_ROW = ROWS - 1;
-  const START_COL = 4;
+  const START_COL = Math.floor(COLS / 2);
+  const rowTop = (r) => (r === BANK_ROW ? 0 : CASTLE_H + (r - 1) * CELL);
+  const rowMid = (r) => (r === BANK_ROW ? CASTLE_H - 34 : rowTop(r) + CELL / 2);
   const HOP_TIME = 0.13;
   const GAME_ID = 'coinCrossing';
   const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
@@ -59,9 +63,9 @@
 
     // How amounts are written: cents first, then dollars, then mixed so he has to convert.
     c.format = L <= 7 ? 'cents' : L <= 9 ? 'dollars' : 'mixed';
-    c.roads = Math.min(2 + Math.floor((L - 1) / 2), 6);
+    c.roads = Math.min(2 + Math.floor((L - 1) / 2), 5);
     c.speed = Math.min(1.0 + 0.12 * (L - 1), 3.4);
-    c.maxCars = L <= 2 ? 1 : L <= 6 ? 2 : 3;
+    c.maxCars = L <= 2 ? 2 : L <= 11 ? 3 : 4;
     c.buses = L >= 5;
     c.extras = Math.min(3 + Math.floor(L / 3), 7);
     c.showNeed = L <= 4;
@@ -121,6 +125,7 @@
   let time = 0;
   let queuedMove = null;
   let lastSaveAt = 0;
+  let gateLift = 0; // 0 = portcullis down, 1 = fully raised
 
   function total() { return pouch.reduce((s, c) => s + c.v, 0); }
 
@@ -138,7 +143,7 @@
     }
 
     // Lanes: row 0 is the castle, the bottom row is the safe start, some middle rows are roads.
-    const middle = shuffle([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    const middle = shuffle(Array.from({ length: ROWS - 2 }, (_, i) => i + 1));
     const roadRows = new Set(middle.slice(0, cfg.roads));
     lanes = [];
     laneByRow = {};
@@ -152,7 +157,7 @@
     const values = decompose(target, cfg.denoms);
     for (let i = 0; i < cfg.extras; i++) values.push(pick(cfg.denoms));
     const cells = [];
-    for (let r = 1; r <= 9; r++) for (let c = 0; c < COLS; c++) cells.push({ r, c });
+    for (let r = 1; r <= ROWS - 2; r++) for (let c = 0; c < COLS; c++) cells.push({ r, c });
     shuffle(cells);
     coins = values.map((v, i) => ({
       v, r: cells[i].r, c: cells[i].c, taken: false, warned: false, bob: Math.random() * 6, fly: null,
@@ -162,6 +167,7 @@
     pouch = [];
     stats = { overshoots: 0, bonks: 0, putBacks: 0, seconds: 0 };
     needRevealed = cfg.showNeed;
+    gateLift = 0;
     particles = [];
     floaters = [];
     queuedMove = null;
@@ -657,7 +663,7 @@
   }
 
   // ---------- Update loop ----------
-  function cellCenter(r, c) { return { x: c * CELL + CELL / 2, y: r * CELL + CELL / 2 }; }
+  function cellCenter(r, c) { return { x: c * CELL + CELL / 2, y: rowMid(r) }; }
 
   function burst(x, y, color, n) {
     for (let i = 0; i < n; i++) {
@@ -669,6 +675,8 @@
 
   function update(dt) {
     time += dt;
+    const gateGoal = total() === target ? 1 : 0;
+    gateLift += Math.sign(gateGoal - gateLift) * Math.min(Math.abs(gateGoal - gateLift), dt * 2.5);
     for (const c of coins) {
       if (c.fly) { c.fly.t += dt / 0.35; if (c.fly.t >= 1) c.fly = null; }
     }
@@ -723,7 +731,7 @@
 
   function drawRows() {
     for (let r = 0; r < ROWS; r++) {
-      const y = r * CELL;
+      const y = rowTop(r);
       if (r === BANK_ROW) continue;
       if (laneByRow[r]) {
         ctx.fillStyle = '#585e66';
@@ -746,43 +754,142 @@
           ctx.fillStyle = '#000';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          for (const c of [0, 2, 6, 8]) ctx.fillText('🌼', c * CELL + 32, y + 32);
+          for (const c of [0, 2, 4, 8, 10, 12]) ctx.fillText('🌼', c * CELL + 32, y + 32);
         }
       }
     }
   }
 
+  function bricks(x, y, w, h, color, mortar) {
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y, w, h);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+    ctx.strokeStyle = mortar;
+    ctx.lineWidth = 2;
+    for (let row = 0, by = y; by < y + h; row++, by += 16) {
+      ctx.beginPath(); ctx.moveTo(x, by); ctx.lineTo(x + w, by); ctx.stroke();
+      for (let bx = x + (row % 2) * 16; bx < x + w; bx += 32) { ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx, by + 16); ctx.stroke(); }
+    }
+    ctx.restore();
+  }
+
+  function merlons(x, y, w, color) {
+    ctx.fillStyle = color;
+    for (let mx = x; mx < x + w - 4; mx += 28) ctx.fillRect(mx, y, 16, 14);
+  }
+
+  function sign(cx, cy, title, big, color) {
+    roundRect(cx - 88, cy - 30, 176, 60, 10);
+    ctx.fillStyle = '#fff4d6'; ctx.fill();
+    ctx.lineWidth = 4; ctx.strokeStyle = '#8a5a2b'; ctx.stroke();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#8a5a2b';
+    ctx.font = `800 13px ${UI_FONT}`;
+    ctx.fillText(title, cx, cy - 15);
+    ctx.fillStyle = color;
+    ctx.font = `900 26px ${UI_FONT}`;
+    ctx.fillText(big, cx, cy + 9);
+  }
+
   function drawCastle() {
     const open = total() === target;
-    ctx.fillStyle = '#c96a4a';
-    ctx.fillRect(0, 0, W, CELL);
-    ctx.strokeStyle = 'rgba(90,30,20,0.35)';
-    ctx.lineWidth = 2;
-    for (let row = 0; row < 3; row++) {
-      const y = 12 + row * 17;
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
-      for (let x = (row % 2) * 20; x < W; x += 40) { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + 17); ctx.stroke(); }
+    const brick = '#c96a4a';
+    const mortar = 'rgba(90,30,20,0.35)';
+
+    // Sky behind the castle
+    const sky = ctx.createLinearGradient(0, 0, 0, CASTLE_H);
+    sky.addColorStop(0, '#a9ddff'); sky.addColorStop(1, '#dff3ff');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, W, CASTLE_H);
+
+    // Long outer wall
+    bricks(0, 62, W, CASTLE_H - 62, brick, mortar);
+    merlons(0, 48, W, brick);
+
+    // Corner towers with pointy roofs and flags
+    for (const tx of [70, W - 70]) {
+      bricks(tx - 50, 40, 100, CASTLE_H - 40, '#b85c3e', mortar);
+      ctx.fillStyle = '#e0473c';
+      ctx.beginPath(); ctx.moveTo(tx - 58, 42); ctx.lineTo(tx + 58, 42); ctx.lineTo(tx, -6); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#3b2a25';
+      roundRect(tx - 12, 70, 24, 34, 12); ctx.fill();
     }
-    // Battlements
-    ctx.fillStyle = '#b25a3c';
-    for (let x = 0; x < W; x += 32) ctx.fillRect(x, 0, 18, 10);
-    // Gate across the whole top row: glows gold when open.
-    const glow = open ? 0.55 + 0.35 * Math.sin(time * 6) : 0;
+
+    // Central keep
+    const kw = 300;
+    const kx = W / 2 - kw / 2;
+    bricks(kx, 22, kw, CASTLE_H - 22, '#d7795a', mortar);
+    merlons(kx, 8, kw, '#d7795a');
+    for (const fx of [kx + 30, kx + kw - 30]) {
+      ctx.fillStyle = '#6b4a2b'; ctx.fillRect(fx - 2, -4, 4, 30);
+      ctx.fillStyle = fx < W / 2 ? '#ffcf33' : '#4aa8ff';
+      const wave = Math.sin(time * 4 + fx) * 3;
+      ctx.beginPath(); ctx.moveTo(fx + 2, -2); ctx.lineTo(fx + 26, 6 + wave); ctx.lineTo(fx + 2, 14); ctx.closePath(); ctx.fill();
+    }
+
+    // Gate: an arch with a portcullis that rises when the amount is exactly right.
+    const gw = 140;
+    const gx = W / 2 - gw / 2;
+    const gTop = 44;
+    const archR = gw / 2;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(gx, CASTLE_H);
+    ctx.lineTo(gx, gTop + archR);
+    ctx.arc(W / 2, gTop + archR, archR, Math.PI, 0);
+    ctx.lineTo(gx + gw, CASTLE_H);
+    ctx.closePath();
+    ctx.fillStyle = open ? '#ffe27a' : '#3a2a22';
+    ctx.fill();
+    ctx.lineWidth = 6; ctx.strokeStyle = '#7a3b26'; ctx.stroke();
+    ctx.clip();
+    if (gateLift > 0) {
+      const inner = ctx.createRadialGradient(W / 2, CASTLE_H - 20, 5, W / 2, CASTLE_H - 20, 120);
+      inner.addColorStop(0, `rgba(255,255,255,${0.9 * gateLift})`);
+      inner.addColorStop(1, 'rgba(255,200,0,0)');
+      ctx.fillStyle = inner;
+      ctx.fillRect(gx, gTop, gw, CASTLE_H - gTop);
+      ctx.font = `30px ${EMOJI_FONT}`;
+      ctx.fillStyle = '#000';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.globalAlpha = gateLift;
+      ctx.fillText('💰', W / 2 - 34, CASTLE_H - 22);
+      ctx.fillText('👑', W / 2 + 34, CASTLE_H - 24);
+      ctx.fillText('✨', W / 2, gTop + 40 + Math.sin(time * 5) * 4);
+      ctx.globalAlpha = 1;
+    }
+    // Portcullis bars slide up as gateLift goes 0 → 1
+    const lift = gateLift * (CASTLE_H - gTop);
+    ctx.strokeStyle = '#8d8f94';
+    ctx.lineWidth = 6;
+    for (let bx = gx + 14; bx < gx + gw; bx += 22) {
+      ctx.beginPath(); ctx.moveTo(bx, gTop - lift); ctx.lineTo(bx, CASTLE_H - lift); ctx.stroke();
+    }
+    ctx.lineWidth = 5;
+    for (let by = gTop + 30; by < CASTLE_H; by += 26) {
+      ctx.beginPath(); ctx.moveTo(gx, by - lift); ctx.lineTo(gx + gw, by - lift); ctx.stroke();
+    }
+    ctx.restore();
+
+    if (gateLift < 1) {
+      ctx.font = `36px ${EMOJI_FONT}`;
+      ctx.fillStyle = '#000';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.globalAlpha = 1 - gateLift;
+      ctx.fillText('🔒', W / 2, CASTLE_H - 40);
+      ctx.globalAlpha = 1;
+    }
+
+    // Signs on either side of the gate
+    sign(230, 104, 'CASTLE NEEDS', MQ.money(target, targetFmt), '#b3471a');
+    sign(W - 230, 104, 'THE GATE IS', open ? 'OPEN! ⬆' : 'LOCKED', open ? '#2e9e5b' : '#6b6475');
+
+    // Golden doorstep glows along the whole wall when open (any column can enter).
     if (open) {
-      ctx.fillStyle = `rgba(255,215,0,${glow})`;
-      ctx.fillRect(0, CELL - 10, W, 10);
+      ctx.fillStyle = `rgba(255,215,0,${0.55 + 0.35 * Math.sin(time * 6)})`;
+      ctx.fillRect(0, CASTLE_H - 8, W, 8);
     }
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.font = `34px ${EMOJI_FONT}`;
-    ctx.fillStyle = '#000';
-    ctx.fillText('🏰', W / 2, CELL / 2 + 2);
-    ctx.font = `22px ${EMOJI_FONT}`;
-    ctx.fillText(open ? '🔓' : '🔒', W / 2 + 38, CELL / 2 + 8);
-    ctx.font = `bold 20px ${UI_FONT}`;
-    ctx.fillStyle = '#fff4d6';
-    ctx.fillText(MQ.money(target, targetFmt), 70, CELL / 2 + 2);
-    ctx.fillText(open ? 'OPEN!' : 'LOCKED', W - 70, CELL / 2 + 2);
   }
 
   function drawCoin(v, x, y, scale = 1) {
@@ -829,7 +936,7 @@
 
   function drawCars() {
     for (const lane of lanes) {
-      const y = lane.row * CELL;
+      const y = rowTop(lane.row);
       for (const car of lane.cars) {
         const x = car.x * CELL + 4;
         const w = car.len * CELL - 8;
@@ -860,7 +967,7 @@
   function drawPlayer() {
     const e = ease(player.t);
     const x = lerp(player.fromC, player.c, e) * CELL + CELL / 2;
-    const yGround = lerp(player.fromR, player.r, e) * CELL + CELL / 2;
+    const yGround = lerp(rowMid(player.fromR), rowMid(player.r), e);
     const hop = Math.sin(Math.PI * player.t) * 18;
     ctx.fillStyle = 'rgba(0,0,0,0.22)';
     ctx.beginPath(); ctx.ellipse(x, yGround + 22, 18 - hop * 0.3, 6, 0, 0, Math.PI * 2); ctx.fill();
