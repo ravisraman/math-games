@@ -157,11 +157,12 @@
         if (R > 10 && R <= 20 && known < 10) {
           return { tip: `Count up from ${known} to ${R}: ${known} + ${10 - known} = 10, then ${R - 10} more.`, more: `${10 - known} + ${R - 10} = ${ans}.` };
         }
-        if (R <= 20) return { tip: `Count up from ${known} to ${R}.`, more: `That is ${ans} steps.` };
+        if (R <= 20 || ans <= 10) return { tip: `Count up from ${known} to ${R}.`, more: `That is ${ans} steps.` };
+        if (R % 10 === 0) return { tip: `Count up from ${known} to the next ten, then by tens to ${R}.`, more: `${R} − ${known} = ${ans}.` };
         return { tip: `Think: ${R} − ${known} = ?`, more: `${R} − ${known} = ${ans}.` };
       }
       if (p.blank === 0) return { tip: `Think addition: ${R} + ${t[1]} = ?`, more: `${R} + ${t[1]} = ${ans}.` };
-      return { tip: `Think: ${t[0]} − ${R} = ?`, more: `${t[0]} − ${R} = ${ans}.` };
+      return { tip: `How many were taken away? Count up from ${R} to ${t[0]}.`, more: `${R} + ${ans} = ${t[0]}.` };
     }
     if (t.length === 3) {
       const pairs = [[0, 1, 2], [0, 2, 1], [1, 2, 0]];
@@ -200,6 +201,7 @@
         const ones = big % 10;
         if (ones + small < 10) return { tip: `Add the ones: ${ones} + ${small} = ${ones + small}. The tens stay the same.` };
         const need = 10 - ones;
+        if (need === small) return { tip: `${ones} + ${small} = 10, so it makes the next ten!` };
         return { tip: `Make the next ten: ${big} + ${need} = ${big + need}, then ${small - need} more.` };
       }
       const tens = tensOf(a) + tensOf(b);
@@ -415,7 +417,7 @@
     const ans = p.answer;
     const cands = [];
     const push = (v, why, w) => cands.push({ v, why, w });
-    const big = ans >= 10 || p.value >= 20;
+    const big = (ans >= 11 || p.value >= 20) && p.skill !== 'add10' && p.skill !== 'sub10';
     push(ans + 2, 'plus2', 1.2);
     push(ans - 2, 'minus2', 1.2);
     if (big) { push(ans + 10, 'plus10', 2); push(ans - 10, 'minus10', 2); }
