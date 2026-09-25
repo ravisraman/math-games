@@ -250,3 +250,10 @@ html[data-layout="landscape"] .card .btn.start { margin-top: 8px; }
 html[data-layout="landscape"] .card .next { margin-top: 4px; font-size: 16px; }
 html[data-layout="landscape"] .card .btn-row { display: flex; gap: 10px; justify-content: center; align-items: center; }
 html[data-layout="landscape"] .card .btn-row .btn { width: auto; flex: 1; margin-top: 8px; }
+.ph-lv-s { display: none; }
+html[data-layout="landscape"] .ph-lv { display: none; }
+html[data-layout="landscape"] .ph-lv-s { display: inline; }
+html[data-layout="landscape"] .ph-pill { padding: 7px 10px; font-size: 16px; }
+html[data-layout="landscape"] .phone-hud { gap: 4px; }
+html[data-layout="landscape"] .ph-btn { width: 44px; }
+html[data-layout="landscape"] .ph-pill { padding: 7px 9px; font-size: 15px; }

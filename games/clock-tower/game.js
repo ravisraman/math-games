@@ -1786,6 +1786,13 @@
       drawHand(hourAngle(q.target), R * 0.54, 24, '#2ec46a', a * 0.8, false);
     }
 
+    // Phones: the hand under the finger glows so he can see what he grabbed.
+    if (drag && isPhone() && !handsHidden) {
+      const a = 0.45 + 0.15 * Math.sin(time * 10);
+      if (drag === 'minute') drawHand(minuteAngle(disp), R * 0.88 + 10, 34, '#ffd54a', a, false);
+      else drawHand(hourAngle(disp), R * 0.54 + 10, 42, '#ffd54a', a, false);
+    }
+
     if (handsHidden) {
       ctx.fillStyle = 'rgba(122,63,176,0.18)';
       ctx.font = `900 150px ${UI_FONT}`;
@@ -2147,7 +2154,678 @@
     ctx.globalAlpha = 1;
   }
 
+  // =====================================================================
+  // ---------- Phone layouts: geometry ----------
+  // Portrait:  HUD strip · question banner · tower strip (8 windows + bell) · big clock · touch buttons.
+  // Landscape: storybook tower on the left · big clock · right column (HUD, banner, buttons).
+  // The clock and tower are the original board drawings placed with a transform.
+  function computeLayout() {
+    if (!isPhone()) { PL = null; return; }
+    const L = { clockZoom: 1 };
+    if (mode === 'portrait') {
+      const pad = 8;
+      const gap = 6;
+      const stripH = 42;
+      let bannerH = 110;
+      let ctrlH = 132;
+      const fixed = HUD_H + bannerH + stripH + gap * 3 + ctrlH + pad;
+      const spare = LH - fixed - Math.min(LW - 4, LH - fixed);
+      if (spare > 0) { bannerH += Math.min(34, spare * 0.45); ctrlH += Math.min(26, spare * 0.35); }
+      L.banner = { x: pad, y: HUD_H, w: LW - pad * 2, h: bannerH };
+      L.strip = { x: pad + 2, y: HUD_H + bannerH + gap, w: LW - pad * 2 - 4, h: stripH };
+      L.ctrl = { x: pad, y: LH - pad - ctrlH, w: LW - pad * 2, h: ctrlH };
+      const top = L.strip.y + stripH + gap;
+      const bot = L.ctrl.y - gap;
+      L.box = Math.max(120, Math.min(LW - 4, bot - top));
+      L.cx = LW / 2;
+      L.cy = (top + bot) / 2;
+      const ts = Math.max(0.2, (L.ctrl.y + ctrlH - L.strip.y) / 745);
+      L.towerPlay = L.towerWin = { s: ts, ox: LW / 2 - 126 * ts, oy: L.strip.y };
+      L.hud = { left: 8, width: LW - 16 };
+    } else {
+      const pad = 6;
+      const ts = Math.max(0.2, (LH - pad * 2) / 745);
+      const towerW = 240 * ts + pad;
+      L.box = Math.max(120, Math.min(LH - pad * 2, LW - towerW - 272 - pad * 2));
+      L.cx = towerW + pad + L.box / 2;
+      L.cy = LH / 2;
+      const colX = L.cx + L.box / 2 + pad;
+      const colW = LW - colX - pad;
+      const ctrlH = Math.min(178, (LH - HUD_H - pad * 2) * 0.55);
+      L.ctrl = { x: colX, y: LH - pad - ctrlH, w: colW, h: ctrlH };
+      L.banner = { x: colX, y: HUD_H, w: colW, h: L.ctrl.y - 6 - HUD_H };
+      L.towerPlay = { s: ts, ox: pad - 12 * ts, oy: pad };
+      L.towerWin = { s: ts, ox: colX / 2 - 126 * ts, oy: pad };
+      L.hud = { left: colX, width: colW };
+    }
+    L.s = L.box / (2 * CLOCK_OUT);
+    const hr = 27;
+    L.hint = { x: Math.min(LW - hr - 4, L.cx + L.box / 2 - hr + 2), y: L.cy + L.box / 2 - hr + 2, r: hr };
+    PL = L;
+  }
+
+  function towerXform() {
+    const k = easeInOut(Math.min(1, towerK));
+    const a = PL.towerPlay;
+    const b = PL.towerWin;
+    return { s: lerp(a.s, b.s, k), ox: lerp(a.ox, b.ox, k), oy: lerp(a.oy, b.oy, k) };
+  }
+  function towerToScreen(x, y) {
+    if (!isPhone()) return { x, y };
+    const t = towerXform();
+    return { x: t.ox + x * t.s, y: t.oy + y * t.s };
+  }
+  function clockToScreen(x, y) {
+    if (!isPhone()) return { x, y };
+    const s = PL.s * PL.clockZoom;
+    return { x: PL.cx + (x - CX) * s, y: PL.cy + (y - CY) * s };
+  }
+  function heroScreen(f) {
+    if (!isPhone()) return heroPos(f);
+    if (mode === 'portrait' && towerK < 0.5) return stripPos(f);
+    const p = heroPos(f);
+    return towerToScreen(p.x, p.y);
+  }
+
+  // ---------- Phones: the tower strip (portrait) ----------
+  function stripSlots() {
+    const b = PL.strip;
+    const x0 = b.x + 38;
+    const x1 = b.x + b.w - 40;
+    return { b, x0, step: (x1 - x0) / FLOORS };
+  }
+  function stripPos(f) {
+    const { b, x0, step } = stripSlots();
+    const y = b.y + b.h / 2 + 1;
+    if (f <= 0) return { x: b.x + 19, y };
+    if (f > FLOORS) return { x: b.x + b.w - 20, y };
+    return { x: x0 + step * (f - 0.5), y };
+  }
+  function drawStrip(alpha) {
+    const { b, x0, step } = stripSlots();
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = 'rgba(60,40,20,0.2)';
+    roundRect(b.x + 2, b.y + 4, b.w, b.h, 12);
+    ctx.fill();
+    const sg = ctx.createLinearGradient(0, b.y, 0, b.y + b.h);
+    sg.addColorStop(0, '#dcc39d');
+    sg.addColorStop(1, '#bf9f74');
+    ctx.fillStyle = sg;
+    roundRect(b.x, b.y, b.w, b.h, 12);
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#8f6f4a';
+    ctx.stroke();
+    // Door on the left (the start), bell on the right (the top).
+    const dx = b.x + 19;
+    const dw = 20;
+    const base = b.y + b.h - 4;
+    const dTop = b.y + 8;
+    ctx.fillStyle = '#7a4a26';
+    ctx.beginPath();
+    ctx.moveTo(dx - dw / 2, base);
+    ctx.lineTo(dx - dw / 2, dTop + dw / 2);
+    ctx.arc(dx, dTop + dw / 2, dw / 2, Math.PI, 0);
+    ctx.lineTo(dx + dw / 2, base);
+    ctx.closePath();
+    ctx.fill();
+    const ww = Math.min(26, step - 9);
+    const wy = b.y + 7;
+    const wh = b.h - 14;
+    for (let k = 1; k <= FLOORS; k++) {
+      const x = x0 + step * (k - 0.5);
+      const lit = k <= floor || state === 'celebrate' || state === 'result';
+      const isNext = k === floor + 1 && state === 'play';
+      const path = () => {
+        ctx.beginPath();
+        ctx.moveTo(x - ww / 2, wy + wh);
+        ctx.lineTo(x - ww / 2, wy + ww / 2);
+        ctx.arc(x, wy + ww / 2, ww / 2, Math.PI, 0);
+        ctx.lineTo(x + ww / 2, wy + wh);
+        ctx.closePath();
+      };
+      if (lit) {
+        const glow = ctx.createRadialGradient(x, wy + wh / 2, 2, x, wy + wh / 2, 26);
+        glow.addColorStop(0, 'rgba(255,214,90,0.6)');
+        glow.addColorStop(1, 'rgba(255,214,90,0)');
+        ctx.fillStyle = glow;
+        ctx.fillRect(x - 26, wy - 8, 52, wh + 16);
+      }
+      path();
+      if (lit) {
+        const g2 = ctx.createRadialGradient(x, wy + wh * 0.6, 2, x, wy + wh / 2, 20);
+        g2.addColorStop(0, '#fff8d0');
+        g2.addColorStop(0.6, '#ffd35a');
+        g2.addColorStop(1, '#f5a623');
+        ctx.fillStyle = g2;
+      } else {
+        const g2 = ctx.createLinearGradient(0, wy, 0, wy + wh);
+        g2.addColorStop(0, '#3b4a7e');
+        g2.addColorStop(1, '#27305a');
+        ctx.fillStyle = g2;
+      }
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = isNext ? `rgba(255,150,30,${0.55 + 0.45 * Math.sin(time * 5)})` : '#a88c66';
+      path();
+      ctx.stroke();
+      if (starWindows.includes(k)) {
+        ctx.font = `12px ${EMOJI_FONT}`;
+        ctx.fillStyle = '#000';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('⭐', x + ww / 2 - 1, wy + 1);
+      }
+    }
+    // Little bell, swinging when rung
+    ctx.save();
+    ctx.translate(b.x + b.w - 20, b.y + 8);
+    ctx.rotate(bellAmp * Math.sin(time * 7) * 0.4);
+    ctx.font = `24px ${EMOJI_FONT}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = '#000';
+    ctx.fillText('🔔', 0, 0);
+    ctx.restore();
+    // The hero hops from window to window
+    const e = ease(Math.min(1, heroAnim.t));
+    const a = stripPos(Math.round(heroAnim.from));
+    const c = stripPos(heroAnim.to);
+    const hx = lerp(a.x, c.x, e);
+    const hy = lerp(a.y, c.y, e) - Math.sin(Math.PI * Math.min(1, heroAnim.t)) * 16 + (heroAnim.t >= 1 ? Math.sin(time * 3) : 0);
+    ctx.font = `26px ${EMOJI_FONT}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(hero, hx, hy);
+    ctx.restore();
+  }
+
+  // ---------- Phones: wrapped, auto-sized text ----------
+  function wrapRich(line, maxW) {
+    const words = line.match(/(?:\{[^}]*\}|[^\s{])+/g) || [''];
+    const out = [];
+    let cur = '';
+    for (const w of words) {
+      const t = cur ? `${cur} ${w}` : w;
+      if (cur && richWidth(t) > maxW) { out.push(cur); cur = w; } else cur = t;
+    }
+    if (cur) out.push(cur);
+    return out;
+  }
+  // Largest font size (maxSize → minSize) at which all lines (wrapped) fit the box.
+  function fitLines(lines, zhLine, maxW, maxH, maxSize, minSize, uniform = false) {
+    let best = null;
+    for (let size = maxSize; size >= minSize; size--) {
+      const rows = [];
+      lines.forEach((line, i) => {
+        const sz = i === 0 || uniform ? size : Math.max(minSize, Math.round(size * 0.9));
+        const wt = i === 0 && !uniform ? 900 : 800;
+        ctx.font = `${wt} ${sz}px ${UI_FONT}`;
+        for (const l of wrapRich(line, maxW)) rows.push({ l, sz, wt });
+      });
+      const zhSize = zhLine ? Math.min(24, Math.max(15, Math.round(size * 0.82))) : 0;
+      const hTot = rows.reduce((acc, r) => acc + r.sz * 1.2, 0) + (zhLine ? zhSize * 1.3 : 0);
+      best = { rows, zhSize, hTot };
+      const fitsW = rows.every((r) => { ctx.font = `${r.wt} ${r.sz}px ${UI_FONT}`; return richWidth(r.l) <= maxW; });
+      if (hTot <= maxH && fitsW) return best;
+    }
+    return best;
+  }
+  function drawTextBlock(fit, cx, top, h, color, hi, zhLine) {
+    let y = top + (h - fit.hTot) / 2;
+    ctx.textBaseline = 'middle';
+    for (const r of fit.rows) {
+      ctx.font = `${r.wt} ${r.sz}px ${UI_FONT}`;
+      drawRich(r.l, cx, y + r.sz * 0.6, color, hi);
+      y += r.sz * 1.2;
+    }
+    if (zhLine) {
+      ctx.font = `700 ${fit.zhSize}px ${ZH_FONT}`;
+      ctx.fillStyle = '#7a3fb0';
+      ctx.textAlign = 'center';
+      ctx.fillText(zhLine, cx, y + fit.zhSize * 0.65);
+    }
+  }
+
+  // ---------- Phones: the question banner ----------
+  function drawPhoneBanner() {
+    const b = PL.banner;
+    let lines;
+    let zhLine;
+    let bg = '#fff6df';
+    let edge = '#c49a5a';
+    const toastOn = toastText && time < toastUntil && state === 'play';
+    if (state === 'celebrate' || state === 'result') {
+      lines = fbLines; zhLine = fbZh; bg = '#fff3c4'; edge = '#e2ad3f';
+    } else if (!q) {
+      lines = ['🕰️ Welcome, clock keeper!']; zhLine = data.settings.chinese ? '钟楼' : '';
+    } else if (toastOn) {
+      lines = [toastText]; zhLine = ''; bg = '#fffbe6'; edge = '#f5c542';
+    } else if (phase === 'feedback') {
+      // Wrong answers: the "how" goes under the clock, next to the Next button.
+      lines = lastRight ? fbLines : fbLines.slice(0, 1); zhLine = fbZh;
+      if (lastRight) { bg = '#e9f8ee'; edge = '#2e9e5b'; } else { bg = '#fff0e3'; edge = '#e08a3c'; }
+    } else {
+      lines = q.lines; zhLine = data.settings.chinese ? q.zh : '';
+    }
+    const pulse = Math.max(0, 1 - (time - bannerPulseAt) / 0.3);
+    ctx.save();
+    if (pulse > 0) {
+      const k = 1 - 0.03 * pulse;
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      ctx.scale(k, k);
+      ctx.translate(-(b.x + b.w / 2), -(b.y + b.h / 2));
+    }
+    ctx.fillStyle = 'rgba(60,40,20,0.18)';
+    roundRect(b.x + 2, b.y + 4, b.w, b.h, 18);
+    ctx.fill();
+    ctx.fillStyle = bg;
+    roundRect(b.x, b.y, b.w, b.h, 18);
+    ctx.fill();
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = edge;
+    ctx.stroke();
+    const speaker = q && phase === 'ask' && state === 'play' && data.settings.voice && !toastOn;
+    const maxW = b.w - (speaker ? 60 : 24);
+    const fit = fitLines(lines, zhLine, maxW, b.h - 14, mode === 'portrait' ? 30 : 28, 15);
+    drawTextBlock(fit, b.x + b.w / 2, b.y + 7, b.h - 14, '#2d2a32', '#c2410c', zhLine);
+    if (speaker) {
+      ctx.font = `20px ${EMOJI_FONT}`;
+      ctx.fillStyle = '#000';
+      ctx.globalAlpha = 0.6;
+      ctx.textAlign = 'center';
+      ctx.fillText('🔊', b.x + b.w - 19, b.y + 20);
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+  }
+
+  // ---------- Phones: touch buttons ----------
+  const isDown = (id) => pressedId === id && (hold || time < pressUntil);
+
+  function circArrow(x, y, r, dir, color) {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    const a0 = -Math.PI / 2 - dir * 0.9;
+    const a1 = a0 + dir * Math.PI * 1.35;
+    ctx.beginPath();
+    ctx.arc(x, y, r, a0, a1, dir < 0);
+    ctx.stroke();
+    const tx = -Math.sin(a1) * dir;
+    const ty = Math.cos(a1) * dir;
+    const hx = x + Math.cos(a1) * r;
+    const hy = y + Math.sin(a1) * r;
+    ctx.beginPath();
+    ctx.moveTo(hx + tx * 6, hy + ty * 6);
+    ctx.lineTo(hx - tx * 2 + Math.cos(a1) * 5, hy - ty * 2 + Math.sin(a1) * 5);
+    ctx.lineTo(hx - tx * 2 - Math.cos(a1) * 5, hy - ty * 2 - Math.sin(a1) * 5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+  // A tiny clock hand lying on its side, pivot on the left.
+  function tinyHand(x, y, len, width, color) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(0, -width / 2);
+    ctx.lineTo(len * 0.6, -width / 2);
+    ctx.lineTo(len * 0.9, -width * 0.28);
+    ctx.lineTo(len, 0);
+    ctx.lineTo(len * 0.9, width * 0.28);
+    ctx.lineTo(len * 0.6, width / 2);
+    ctx.lineTo(0, width / 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(0, 0, width * 0.62, 0, Math.PI * 2);
+    ctx.fillStyle = '#c08a2a';
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function handButton(id, x, y, w, h, hand, dir, label, fn, repeat) {
+    const blue = hand === 'minute';
+    const color = blue ? MIN_COLOR : HOUR_COLOR;
+    const down = isDown(id);
+    button(x, y, w, h, {
+      fill: down ? (blue ? '#dcecff' : '#ffe3df') : '#fff',
+      edge: blue ? '#8fbcf0' : '#f2a59d',
+      shadow: blue ? '#a9c6ea' : '#e7b3ad',
+      lift: down ? -4 : 0,
+    });
+    const yy = y + (down ? 4 : 0);
+    let len = blue ? Math.min(w * 0.46, 44) : Math.min(w * 0.3, 28);
+    const hw = blue ? 8 : 12;
+    const r = 9;
+    // Tall buttons: picture above the words. Short wide buttons (landscape): side by side.
+    const wide = w > h * 2.4;
+    let size = Math.min(19, Math.round(h * (wide ? 0.36 : 0.28)));
+    ctx.font = `900 ${size}px ${UI_FONT}`;
+    let labW = ctx.measureText(label).width;
+    if (wide) {
+      const minLen = blue ? 26 : 18;
+      len = Math.max(minLen, Math.min(len, w - 20 - 10 - r * 2 - 8 - labW));
+      while (len + 10 + r * 2 + 8 + labW > w - 16 && size > 13) {
+        size--;
+        ctx.font = `900 ${size}px ${UI_FONT}`;
+        labW = ctx.measureText(label).width;
+      }
+    }
+    const total = len + 10 + r * 2;
+    const iconY = wide ? yy + h / 2 : yy + h * 0.36;
+    const left = wide ? x + (w - total - 8 - labW) / 2 : x + (w - total) / 2;
+    if (dir < 0) {
+      circArrow(left + r, iconY, r, -1, color);
+      tinyHand(left + r * 2 + 12, iconY, len, hw, color);
+    } else {
+      tinyHand(left + 2, iconY, len, hw, color);
+      circArrow(left + len + 10 + r, iconY, r, 1, color);
+    }
+    ctx.font = `900 ${size}px ${UI_FONT}`;
+    ctx.fillStyle = color;
+    ctx.textBaseline = 'middle';
+    if (wide) {
+      ctx.textAlign = 'left';
+      ctx.fillText(label, left + total + 8, iconY + 1);
+    } else {
+      while (ctx.measureText(label).width > w - 10 && size > 13) { size--; ctx.font = `900 ${size}px ${UI_FONT}`; }
+      ctx.textAlign = 'center';
+      ctx.fillText(label, x + w / 2, yy + h * 0.74);
+    }
+    hits.push({ id, x, y, w, h, repeat, fn: () => { coachSeen.set = true; fn(); } });
+  }
+
+  function bigButton(id, x, y, w, h, text, colors, fn, size = 30) {
+    const down = isDown(id);
+    button(x, y, w, h, { fill: colors[0], edge: colors[1], shadow: colors[2], lift: down ? -4 : 0 });
+    let s = size;
+    ctx.font = `900 ${s}px ${UI_FONT}`;
+    while (ctx.measureText(text).width > w - 16 && s > 16) { s--; ctx.font = `900 ${s}px ${UI_FONT}`; }
+    ctx.fillStyle = colors[3] || '#fff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x + w / 2, y + h / 2 + (down ? 4 : 0));
+    hits.push({ id, x, y, w, h, fn });
+  }
+
+  function drawHintButton() {
+    const hb = PL.hint;
+    const down = isDown('hint');
+    const y = hb.y + (down ? 3 : 0);
+    ctx.fillStyle = '#e8d489';
+    ctx.beginPath(); ctx.arc(hb.x, hb.y + 4, hb.r, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = time < labelFlashUntil ? '#fff3b0' : '#fffbe6';
+    ctx.beginPath(); ctx.arc(hb.x, y, hb.r, 0, Math.PI * 2); ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#f0cf5a';
+    ctx.stroke();
+    ctx.font = `26px ${EMOJI_FONT}`;
+    ctx.fillStyle = '#000';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('💡', hb.x, y + 1);
+    const pad = 8;
+    hits.push({ id: 'hint', x: hb.x - hb.r - pad, y: hb.y - hb.r - pad, w: (hb.r + pad) * 2, h: (hb.r + pad) * 2, fn: hint });
+  }
+
+  function drawWrongArea() {
+    const c = PL.ctrl;
+    const gap = 8;
+    let ex;
+    let nx;
+    if (mode === 'portrait') {
+      const nw = 118;
+      ex = { x: c.x, y: c.y, w: c.w - nw - gap, h: c.h };
+      nx = { x: c.x + c.w - nw, y: c.y, w: nw, h: c.h };
+    } else {
+      const nh = Math.min(62, c.h * 0.38);
+      ex = { x: c.x, y: c.y, w: c.w, h: c.h - nh - gap };
+      nx = { x: c.x, y: c.y + c.h - nh, w: c.w, h: nh };
+    }
+    ctx.fillStyle = 'rgba(60,40,20,0.15)';
+    roundRect(ex.x + 2, ex.y + 4, ex.w, ex.h, 16);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.96)';
+    roundRect(ex.x, ex.y, ex.w, ex.h, 16);
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#f0c49a';
+    ctx.stroke();
+    const lines = fbLines.slice(1);
+    if (lines.length) {
+      const fit = fitLines(lines, '', ex.w - 20, ex.h - 12, 19, 14, true);
+      drawTextBlock(fit, ex.x + ex.w / 2, ex.y + 6, ex.h - 12, '#2d2a32', '#c2410c', '');
+    }
+    const pulse = Math.sin(time * 4) * 2;
+    const down = isDown('next');
+    button(nx.x, nx.y, nx.w, nx.h, { fill: '#2e9e5b', edge: '#23804a', shadow: '#1d6b3d', lift: down ? -4 : pulse });
+    ctx.fillStyle = '#fff';
+    ctx.font = `900 26px ${UI_FONT}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Next ▶', nx.x + nx.w / 2, nx.y + nx.h / 2 - (down ? -4 : pulse));
+    // A short wait so a quick double tap on Check can't skip the explanation.
+    hits.push({ id: 'next', ...nx, fn: () => advance(0.7) });
+  }
+
+  function drawPraiseCard() {
+    const c = PL.ctrl;
+    const h = Math.min(c.h, 84);
+    const y = c.y + (c.h - h) / 2;
+    button(c.x + 12, y, c.w - 24, h, { fill: '#e9f8ee', edge: '#2e9e5b', shadow: '#bfe3cb' });
+    ctx.fillStyle = '#1f7a45';
+    ctx.font = `900 34px ${UI_FONT}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`✔ ${q.answerText}`, c.x + c.w / 2, y + h / 2);
+  }
+
+  function choiceRects() {
+    const c = PL.ctrl;
+    const n = q.options.length;
+    const gap = 8;
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      if (mode === 'portrait') {
+        const bw = (c.w - gap * (n - 1)) / n;
+        out.push({ x: c.x + i * (bw + gap), y: c.y, w: bw, h: c.h - 6 });
+      } else {
+        const bh = (c.h - gap * (n - 1)) / n;
+        out.push({ x: c.x, y: c.y + i * (bh + gap), w: c.w, h: bh - 4 });
+      }
+    }
+    return out;
+  }
+
+  function drawChoices() {
+    const rects = choiceRects();
+    q.options.forEach((opt, i) => {
+      const r = rects[i];
+      const id = `opt${i}`;
+      let fill = '#fff';
+      let edge = '#e2d8c6';
+      let ink = '#2d2a32';
+      let lift = 0;
+      if (phase === 'feedback') {
+        if (i === q.answerIdx) { fill = '#e6f7ec'; edge = '#2e9e5b'; ink = '#1f7a45'; }
+        else if (i === q.picked) { fill = '#fdecec'; edge = '#d9534f'; ink = '#b23b37'; }
+        else { ink = '#9a93a8'; }
+      } else if (isDown(id)) {
+        fill = '#eaf5ff'; edge = '#4aa8ff'; lift = -4;
+      } else if (usedKeys && i === sel) {
+        fill = '#eaf5ff'; edge = '#4aa8ff'; lift = 3;
+      }
+      button(r.x, r.y, r.w, r.h, { fill, edge, lift });
+      const sub = q.subs ? q.subs[i] : null;
+      const cy = r.y - lift + r.h / 2 - (sub ? 11 : 0);
+      ctx.fillStyle = ink;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const maxW = r.w - 14;
+      let size = mode === 'portrait' ? 34 : 32;
+      ctx.font = `900 ${size}px ${UI_FONT}`;
+      while (ctx.measureText(opt).width > maxW && size > 22) { size--; ctx.font = `900 ${size}px ${UI_FONT}`; }
+      if (ctx.measureText(opt).width <= maxW) {
+        ctx.fillText(opt, r.x + r.w / 2, cy);
+      } else {
+        let s2 = 22;
+        let two;
+        do {
+          ctx.font = `900 ${s2}px ${UI_FONT}`;
+          two = wrapRich(opt, maxW);
+          s2--;
+        } while (two.length > 2 && s2 > 15);
+        const lh = s2 * 1.15;
+        two.forEach((l, j) => ctx.fillText(l, r.x + r.w / 2, cy + (j - (two.length - 1) / 2) * lh));
+      }
+      if (sub) {
+        ctx.font = `800 15px ${UI_FONT}`;
+        ctx.fillStyle = '#6b6475';
+        ctx.fillText(sub, r.x + r.w / 2, cy + 28);
+      }
+      if (phase === 'feedback' && (i === q.answerIdx || i === q.picked)) {
+        ctx.font = `20px ${EMOJI_FONT}`;
+        ctx.fillStyle = '#000';
+        ctx.fillText(i === q.answerIdx ? '✅' : '❌', r.x + r.w - 14, r.y + 14);
+      }
+      if (phase === 'ask') hits.push({ id, ...r, fn: () => { sel = i; coachSeen.choice = true; submit(); } });
+    });
+    return rects;
+  }
+
+  function drawPhoneControls() {
+    hits = [];
+    if (!q || state !== 'play') return;
+    const c = PL.ctrl;
+    const gap = 8;
+    if (q.mode === 'set') {
+      if (phase === 'ask') {
+        const step = cfg.step;
+        const lab = `${step} min`;
+        const orange = ['#ff7a3d', '#e0642a', '#c9541f'];
+        const btns = [
+          ['m-', 'minute', -1, lab, () => setClock(clockT - step), true],
+          ['m+', 'minute', 1, lab, () => setClock(clockT + step), true],
+          ['h-', 'hour', -1, '− 1 hour', () => setClock(clockT - 60, 0.3), false],
+          ['h+', 'hour', 1, '+ 1 hour', () => setClock(clockT + 60, 0.3), false],
+        ];
+        if (mode === 'portrait') {
+          const h1 = Math.round((c.h - gap) * 0.54);
+          const mid = 10;
+          const bw = (c.w - gap * 3 - mid) / 4;
+          const xs = [c.x, c.x + bw + gap, c.x + 2 * (bw + gap) + mid, c.x + 3 * (bw + gap) + mid];
+          btns.forEach((b, i) => handButton(b[0], xs[i], c.y, bw, h1, b[1], b[2], b[3], b[4], b[5]));
+          bigButton('check', c.x, c.y + h1 + gap, c.w, c.h - h1 - gap - 6, '✔ Check', orange, submit);
+        } else {
+          const hh = (c.h - gap * 2 - 6) / 3;
+          const bw = (c.w - gap) / 2;
+          btns.forEach((b, i) => handButton(b[0], c.x + (i % 2) * (bw + gap), c.y + Math.floor(i / 2) * (hh + gap), bw, hh, b[1], b[2], b[3], b[4], b[5]));
+          bigButton('check', c.x, c.y + 2 * (hh + gap), c.w, hh, '✔ Check', orange, submit, 28);
+        }
+        drawHintButton();
+      } else if (lastRight) {
+        drawPraiseCard();
+      } else {
+        drawWrongArea();
+      }
+      drawCoach(null);
+      return;
+    }
+    if (phase === 'feedback' && !lastRight) { drawWrongArea(); return; }
+    const rects = drawChoices();
+    if (phase === 'ask') drawHintButton();
+    drawCoach(rects);
+  }
+
+  // 👆 A finger shows what to do the first time (goes away as soon as he touches).
+  function drawCoach(rects) {
+    if (state !== 'play' || phase !== 'ask' || !q || towerK > 0.01) return;
+    let x;
+    let y;
+    let alpha = 1;
+    if (q.mode === 'set') {
+      if (coachSeen.set) return;
+      const cyc = (time % 2.4) / 2.4;
+      const t = easeInOut(Math.min(1, cyc / 0.7));
+      alpha = cyc < 0.85 ? 1 : (1 - cyc) / 0.15;
+      const ang = ((minuteAngle(disp) + t * 60) * Math.PI) / 180;
+      const p = clockToScreen(CX + Math.sin(ang) * R * 0.8, CY - Math.cos(ang) * R * 0.8);
+      x = p.x; y = p.y;
+      // a dotted trail showing the drag
+      ctx.save();
+      ctx.globalAlpha = alpha * 0.7;
+      ctx.strokeStyle = '#ff9d2e';
+      ctx.lineWidth = 5;
+      ctx.lineCap = 'round';
+      ctx.setLineDash([2, 10]);
+      const a0 = ((minuteAngle(disp) - 90) * Math.PI) / 180;
+      const rr = R * 0.8 * PL.s;
+      ctx.beginPath();
+      ctx.arc(PL.cx, PL.cy, rr, a0, a0 + (t * 60 * Math.PI) / 180);
+      ctx.stroke();
+      ctx.restore();
+    } else {
+      if (coachSeen.choice || !rects) return;
+      const r = rects[Math.floor(rects.length / 2)];
+      if (mode === 'portrait') { x = r.x + r.w / 2 + 10; y = r.y + r.h * 0.62 + Math.sin(time * 5) * 6; }
+      else { x = r.x + r.w - 34; y = r.y + r.h * 0.3 + Math.sin(time * 5) * 5; }
+    }
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.font = `46px ${EMOJI_FONT}`;
+    ctx.fillStyle = '#000';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.shadowColor = 'rgba(0,0,0,0.25)';
+    ctx.shadowBlur = 6;
+    ctx.fillText('👆', x + 4, y - 6);
+    ctx.restore();
+  }
+
+  function drawPhone() {
+    const k = easeInOut(Math.min(1, towerK));
+    PL.clockZoom = Math.max(0.001, 1 - k);
+    ctx.clearRect(0, 0, LW, LH);
+    // The storybook sky + village, scaled to cover the screen (ground at the bottom).
+    const sc = Math.max(LW / W, LH / H);
+    ctx.save();
+    ctx.translate((LW - W * sc) / 2, LH - H * sc);
+    ctx.scale(sc, sc);
+    drawSky();
+    ctx.restore();
+    if (mode === 'landscape' || k > 0.01) {
+      const t = towerXform();
+      ctx.save();
+      if (mode === 'portrait') ctx.globalAlpha = k;
+      ctx.translate(t.ox, t.oy);
+      ctx.scale(t.s, t.s);
+      drawTower();
+      drawHero();
+      ctx.restore();
+    }
+    if (k < 0.99) {
+      const s = PL.s * PL.clockZoom;
+      ctx.save();
+      ctx.translate(PL.cx, PL.cy);
+      ctx.scale(s, s);
+      ctx.translate(-CX, -CY);
+      drawClock();
+      ctx.restore();
+    }
+    drawPhoneBanner();
+    if (mode === 'portrait' && k < 0.99) drawStrip(1 - k);
+    drawPhoneControls();
+    drawEffects();
+  }
+
   function draw() {
+    if (isPhone()) { drawPhone(); return; }
     ctx.clearRect(0, 0, W, H);
     drawSky();
     drawTower();
@@ -2170,6 +2848,8 @@
     if (heroAnim.t < 1) heroAnim.t = Math.min(1, heroAnim.t + dt / 0.6);
     if (heroAnim.t >= 1) heroAnim.from = heroAnim.to;
     bellAmp = Math.max(0, bellAmp - dt * 0.45);
+    const towerGoal = state === 'celebrate' || state === 'result' ? 1 : 0;
+    towerK = towerGoal > towerK ? Math.min(1, towerK + dt / 0.9) : Math.max(0, towerK - dt / 0.5);
     const skyGoal = Math.min(1, floor / FLOORS);
     skyProgress += (skyGoal - skyProgress) * Math.min(1, dt * 1.5);
 
@@ -2191,23 +2871,58 @@
   }
 
   // ---------- Sizing (crisp on Retina screens) ----------
+  // Laptop-sized windows keep the original board + side panel. Anything smaller (phones, small
+  // tablets) gets a phone layout: portrait or landscape, filling the screen inside the safe areas.
+  function pickMode() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const deskScale = Math.min((w - 356) / W, (h - 24) / H);
+    if (deskScale >= 0.7) return 'desk';
+    return h >= w ? 'portrait' : 'landscape';
+  }
+
   let pixelScale = 1;
   function resize() {
-    const narrow = window.innerWidth <= 860;
-    const availW = narrow ? window.innerWidth - 24 : window.innerWidth - 300 - 20 - 36;
-    const availH = narrow ? window.innerHeight * 0.7 : window.innerHeight - 24;
-    const scale = Math.max(0.4, Math.min(availW / W, availH / H, 1.5));
+    mode = pickMode();
+    document.documentElement.dataset.layout = mode;
     const dpr = window.devicePixelRatio || 1;
-    stage.style.width = `${Math.round(W * scale)}px`;
-    stage.style.height = `${Math.round(H * scale)}px`;
-    canvas.style.width = `${Math.round(W * scale)}px`;
-    canvas.style.height = `${Math.round(H * scale)}px`;
-    canvas.width = Math.round(W * scale * dpr);
-    canvas.height = Math.round(H * scale * dpr);
-    pixelScale = scale * dpr;
-    ctx.setTransform(pixelScale, 0, 0, pixelScale, 0, 0);
+    const hud = el('phud');
+    if (mode === 'desk') {
+      LW = W;
+      LH = H;
+      PL = null;
+      const narrow = window.innerWidth <= 860;
+      const availW = narrow ? window.innerWidth - 24 : window.innerWidth - 300 - 20 - 36;
+      const availH = narrow ? window.innerHeight * 0.7 : window.innerHeight - 24;
+      const scale = Math.max(0.4, Math.min(availW / W, availH / H, 1.5));
+      stage.style.width = `${Math.round(W * scale)}px`;
+      stage.style.height = `${Math.round(H * scale)}px`;
+      canvas.style.width = `${Math.round(W * scale)}px`;
+      canvas.style.height = `${Math.round(H * scale)}px`;
+      canvas.width = Math.round(W * scale * dpr);
+      canvas.height = Math.round(H * scale * dpr);
+      pixelScale = scale * dpr;
+      ctx.setTransform(pixelScale, 0, 0, pixelScale, 0, 0);
+      return;
+    }
+    stage.style.width = '';
+    stage.style.height = '';
+    LW = Math.max(240, stage.clientWidth);
+    LH = Math.max(240, stage.clientHeight);
+    canvas.style.width = `${LW}px`;
+    canvas.style.height = `${LH}px`;
+    canvas.width = Math.round(LW * dpr);
+    canvas.height = Math.round(LH * dpr);
+    pixelScale = dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    computeLayout();
+    hud.style.left = `${PL.hud.left}px`;
+    hud.style.width = `${PL.hud.width}px`;
+    hud.style.right = 'auto';
   }
   window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', () => { resize(); setTimeout(resize, 250); });
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
 
   let last = performance.now();
   function frame(now) {
@@ -2242,6 +2957,10 @@
       };
     },
     get disp() { return disp; },
+    get mode() { return mode; },
+    get layout() { return PL; },
+    get hits() { return hits.map((h) => ({ id: h.id, x: h.x, y: h.y, w: h.w, h: h.h })); },
+    clockToScreen,
     ask(type, variant) { forcedNext = { type, variant }; if (state === 'play' && phase === 'ask') nextQuestion(); },
     setLevel(n) { g.level = n; cfg = cfgFor(n); updateHud(); },
     logic: { norm, T, fmt, hourAngle, minuteAngle, zhTime, zhDur, durText, wordsFor, cfgFor, makeQuestion, explainForward, explainBackward, shortest },

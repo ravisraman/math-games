@@ -236,7 +236,7 @@
     const span = COLS + 4;
     const narrow = COLS < 13;
     const speed = cfg.speed * (narrow ? 0.9 : 1) * (0.75 + Math.random() * 0.5);
-    const maxCars = narrow ? Math.max(1, Math.round(cfg.maxCars * span / 17)) : cfg.maxCars;
+    const maxCars = narrow ? Math.max(1, Math.round(cfg.maxCars * span / 17 - 0.25)) : cfg.maxCars;
     const n = rand(1, maxCars);
     const gap = span / n;
     const cars = [];
@@ -273,7 +273,7 @@
     need2.classList.toggle('done', t === target);
     if (t === target) need2.textContent = '✅ Exactly! Hop up ⬆';
     else if (needRevealed) need2.textContent = `Need ${MQ.money(target - t, targetFmt)} more`;
-    else need2.textContent = 'How much more? 🤔';
+    else need2.textContent = 'Need ? more 🤔';
     el('btn-back').classList.toggle('empty', pouch.length === 0);
   }
 

@@ -437,3 +437,14 @@ html.lay-land .choice { min-height: 54px; }
 html.lay-land .explain { margin-top: 6px; font-size: 16px; }
 html.lay-land .touch-hint .finger { font-size: 46px; }
 html.lay-land .touch-hint .hint-text { font-size: 16px; }
+html.lay-land .box { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; }
+html.lay-land .box .label, html.lay-land .box .need2, html.lay-land .box .pouch-coins { flex: 1 0 100%; }
+html.lay-land .box .big { line-height: 1.05; }
+html.lay-land .pouch-coins { flex-wrap: wrap; }
+
+/* Portrait: "🏰 Castle needs" on two short lines, the amount and "need more" stacked beside it. */
+html.lay-port .target-box { grid-template-areas: "label big" "label need"; grid-template-columns: auto minmax(0, 1fr); }
+html.lay-port .target-box .label { white-space: normal; width: 62px; font-size: 13px; }
+html.lay-port .target-box .big { line-height: 1; }
+html.lay-port .level-pill .lvl-word { display: none; }
+html.lay-port .level-pill::before { content: "Lv"; font-size: 14px; margin-right: 4px; color: var(--muted); }
