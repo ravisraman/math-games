@@ -257,3 +257,8 @@ html[data-layout="landscape"] .ph-pill { padding: 7px 10px; font-size: 16px; }
 html[data-layout="landscape"] .phone-hud { gap: 4px; }
 html[data-layout="landscape"] .ph-btn { width: 44px; }
 html[data-layout="landscape"] .ph-pill { padding: 7px 9px; font-size: 15px; }
+.card .home-link { text-decoration: none; }
+html[data-layout="portrait"] .card .btn-row { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+html[data-layout="portrait"] .card .btn-row .btn { margin-top: 0; }
+html[data-layout="portrait"] .card .btn-row .btn.start { margin-top: 12px; }
+html[data-layout="landscape"] .card .btn-row .home-link { display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
