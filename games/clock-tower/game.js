@@ -209,6 +209,12 @@
   // Where the hands start for a set-the-clock question: on the step grid, away from the answer.
   function startFor(target, c) {
     for (let i = 0; i < 80; i++) {
+      // At 1-minute steps keep the long hand within a few numbers of the answer (less key-holding).
+      if (c.step === 1) {
+        const s1 = T(rand(1, 12), minOf(target) + pick([-1, 1]) * rand(4, 20));
+        if (Math.abs(shortest(s1, target)) >= 20) return s1;
+        continue;
+      }
       const s = c.L <= 2 ? T(rand(1, 12), pick([0, 0, 30])) : T(rand(1, 12), rand(0, 11) * 5);
       if (Math.abs(shortest(s, target)) >= 20 && minOf(s) !== minOf(target)) return s;
     }
@@ -386,15 +392,16 @@
     };
   }
 
+  // [picture, start, how long, question, what to set]
   const LATER = [
-    ['🍪', 'Cookies go in the oven at {A}.', 'They bake for {D}. When are they done?'],
-    ['🚌', 'The bus leaves at {A}.', 'The ride takes {D}. When does it get there?'],
-    ['⚽', 'Soccer starts at {A}.', 'It lasts {D}. When does it end?'],
-    ['🎹', 'Piano practice starts at {A}.', 'It lasts {D}. When does it end?'],
-    ['🥟', 'Dumplings go in the steamer at {A}.', 'They need {D}. When are they ready?'],
-    ['🔔', 'The school bell rings at {A}.', 'Lunch is {D} later. What time is lunch?'],
-    ['🎬', 'The movie starts at {A}.', 'It is {D} long. When does it end?'],
-    ['🚂', 'The train leaves at {A}.', 'The trip takes {D}. When does it arrive?'],
+    ['🍪', 'Cookies go in the oven at {A}.', 'They bake for {D}.', 'When are they done?', 'the cookies are done'],
+    ['🚌', 'The bus leaves at {A}.', 'The ride takes {D}.', 'When does it get there?', 'the bus gets there'],
+    ['⚽', 'Soccer starts at {A}.', 'It lasts {D}.', 'When does it end?', 'soccer ends'],
+    ['🎹', 'Piano practice starts at {A}.', 'It lasts {D}.', 'When does it end?', 'practice ends'],
+    ['🥟', 'Dumplings go in the steamer at {A}.', 'They need {D}.', 'When are they ready?', 'the dumplings are ready'],
+    ['🔔', 'The school bell rings at {A}.', 'Lunch is {D} later.', 'What time is lunch?', 'lunch starts'],
+    ['🎬', 'The movie starts at {A}.', 'It is {D} long.', 'When does it end?', 'the movie ends'],
+    ['🚂', 'The train leaves at {A}.', 'The trip takes {D}.', 'When does it arrive?', 'the train arrives'],
   ];
   const HOWLONG = [
     ['🧸', 'Recess starts at {A} and ends at {B}.', 'How long is recess?'],
@@ -447,10 +454,10 @@
     const v = variant || pick(kinds);
     const B = A + d;
     if (v === 'later' || v === 'set') {
-      const [emoji, l1, l2] = pick(LATER);
+      const [emoji, l1, l2, ask, when] = pick(LATER);
       const vals = { A: fmt(A), D: durWords(d) };
-      const lines = [`${emoji} ${fill(l1, vals)}`, fill(l2, vals)];
-      const speak = plain(`${l1.replace('{A}', speakTime(A))} ${l2.replace('{D}', durWords(d))}`);
+      const lines = [`${emoji} ${fill(l1, vals)}`, `${fill(l2, vals)} ${ask}`];
+      const speak = plain(`${l1.replace('{A}', speakTime(A))} ${l2.replace('{D}', durWords(d))} ${ask}`);
       const base = {
         type: 'elapsed', start: A, d, zh: `${zhTime(A)} + ${zhDur(d)}`, zhAfter: zhTime(B),
         answerText: fmt(B), answerSpeak: speakTime(B),
@@ -459,8 +466,8 @@
       if (v === 'set') {
         return {
           ...base, mode: 'set', variant: 'set', target: norm(B),
-          lines: [lines[0], lines[1].replace(/\?$/, '') + ' Set the clock!'],
-          speak: `${speak} Move the clock to that time.`,
+          lines: [lines[0], `${fill(l2, vals)} ⏰ Set the clock to when ${when}!`],
+          speak: plain(`${l1.replace('{A}', speakTime(A))} ${l2.replace('{D}', durWords(d))} Set the clock to when ${when}.`),
         };
       }
       return {
@@ -558,6 +565,8 @@
   let starWindows = [];
   let retry = [];
   let recentTypes = [];
+  let usedAnswers = [];
+  let forcedNext = null; // test hook: ask a particular kind of question next
   let stats = null;
   let lastRight = false;
   let fbLines = [];
@@ -592,6 +601,7 @@
     starWindows = [];
     retry = [];
     recentTypes = [];
+    usedAnswers = [];
     wrongStreak = 0;
     stats = { seconds: 0, hints: 0, wrong: 0, asked: 0 };
     heroAnim.from = heroAnim.to = 0;
@@ -630,9 +640,15 @@
   }
 
   function nextQuestion() {
-    const type = chooseType();
+    const type = forcedNext ? forcedNext.type : chooseType();
     recentTypes.push(type);
-    q = MAKERS[type](cfg);
+    // Fresh times each question: re-roll if this answer already came up this round.
+    for (let i = 0; i < 12; i++) {
+      q = MAKERS[type](cfg, forcedNext ? forcedNext.variant : undefined);
+      if (!usedAnswers.includes(q.answerText)) break;
+    }
+    forcedNext = null;
+    usedAnswers.push(q.answerText);
     q.id = ++qid;
     stats.asked++;
     phase = 'ask';
@@ -752,7 +768,7 @@
     }
     revealClock(true);
     const cheer = wrongStreak >= 2 ? ` ${MQ.CHEER.zh} (${MQ.CHEER.py})` : '';
-    say(`${plain(fbLines.join(' '))}${cheer} Press return to go on.`);
+    say(`Look at the clock: this is ${q.answerText}.${cheer} We'll try one like this again soon. Press return to go on.`);
     MQ.Voice.say(`${opener} The answer is ${q.answerSpeak || speakTime(q.target)}.`, 'en-US', { interrupt: true });
   }
 
@@ -801,6 +817,7 @@
     climbTo(FLOORS + 1);
     fbLines = ['🔔 You reached the top of the tower!', 'Ring the big bell!'];
     fbZh = data.settings.chinese ? '敲钟啦!' : '';
+    updateHud();
     say('🔔 You made it to the top! Ding, dong!');
     for (let i = 0; i < 3; i++) {
       setTimeout(() => {
@@ -898,8 +915,8 @@
       return `<span class="${cls}">${starWindows.includes(k) ? '⭐' : ''}</span>`;
     }).join('');
     el('floor').textContent = floor >= FLOORS ? 'Top of the tower! 🔔' : `Floor ${floor} of ${FLOORS}`;
-    el('skill').textContent = q ? SKILL_TAG[q.type] : '🕰️ Clock Tower';
-    el('level-title').textContent = `Level ${g.level}: ${cfg.title}`;
+    el('skill').textContent = state === 'celebrate' || state === 'result' ? '🔔 Ring the bell!' : q ? SKILL_TAG[q.type] : '🕰️ Clock Tower';
+    el('level-title').textContent = `Level ${g.level}: ${cfgFor(g.level).title}`;
   }
 
   function say(text, { speak = false } = {}) {
@@ -964,6 +981,7 @@
     const p = toBoard(e);
     const hit = hits.find((h) => inside(p, h));
     if (hit) { hit.fn(); return; }
+    if (q && phase === 'ask' && inside(p, BANNER)) { MQ.Voice.say(q.speak, 'en-US', { interrupt: true }); return; }
     if (phase === 'feedback') { advance(); return; }
     if (phase === 'ask' && q && q.mode === 'set') {
       const dist = Math.hypot(p.x - CX, p.y - CY);
@@ -1098,9 +1116,9 @@
     { x: 330, w: 44, h: 52, wall: '#fbe7c6', roof: '#7a3fb0' },
     { x: 700, w: 52, h: 38, wall: '#f4dcc0', roof: '#2f6fd6' },
     { x: 762, w: 40, h: 50, wall: '#fbe7c6', roof: '#d9534f' },
-    { x: 846, w: 62, h: 44, wall: '#f6d7b0', roof: '#2e9e5b' },
-    { x: 928, w: 46, h: 56, wall: '#fbe7c6', roof: '#e08a3c' },
-    { x: 986, w: 50, h: 40, wall: '#f4dcc0', roof: '#7a3fb0' },
+    { x: 850, w: 56, h: 34, wall: '#f6d7b0', roof: '#2e9e5b' },
+    { x: 930, w: 44, h: 38, wall: '#fbe7c6', roof: '#e08a3c' },
+    { x: 986, w: 50, h: 32, wall: '#f4dcc0', roof: '#7a3fb0' },
   ];
 
   function mixColor(a, b, t) {
@@ -1493,15 +1511,16 @@
     ctx.translate(CX, CY);
     ctx.rotate((angle * Math.PI) / 180);
     ctx.globalAlpha = alpha;
+    // Tapered shaft with a slim pointed tip, so the numbers stay readable underneath.
     const shape = () => {
       ctx.beginPath();
-      ctx.moveTo(-width * 0.5, 22);
-      ctx.quadraticCurveTo(0, 30, width * 0.5, 22);
-      ctx.lineTo(width * 0.42, -len * 0.72);
-      ctx.lineTo(width * 0.72, -len * 0.74);
+      ctx.moveTo(-width * 0.55, 20);
+      ctx.quadraticCurveTo(0, 28, width * 0.55, 20);
+      ctx.lineTo(width * 0.5, -len * 0.45);
+      ctx.lineTo(width * 0.28, -len * 0.9);
       ctx.lineTo(0, -len);
-      ctx.lineTo(-width * 0.72, -len * 0.74);
-      ctx.lineTo(-width * 0.42, -len * 0.72);
+      ctx.lineTo(-width * 0.28, -len * 0.9);
+      ctx.lineTo(-width * 0.5, -len * 0.45);
       ctx.closePath();
     };
     if (shadow) {
@@ -1616,14 +1635,14 @@
 
     // Ghost of the player's wrong answer, so he can compare
     if (phase === 'feedback' && q && q.ghostTheirs != null) {
-      drawHand(hourAngle(q.ghostTheirs), R * 0.5, 20, '#9a93a8', 0.35, false);
-      drawHand(minuteAngle(q.ghostTheirs), R * 0.8, 13, '#9a93a8', 0.35, false);
+      drawHand(hourAngle(q.ghostTheirs), R * 0.54, 22, '#9a93a8', 0.35, false);
+      drawHand(minuteAngle(q.ghostTheirs), R * 0.88, 14, '#9a93a8', 0.35, false);
     }
     // Hint: glowing target hands
     if (time < hintUntil && q && q.mode === 'set') {
       const a = 0.35 + 0.25 * Math.sin(time * 8);
-      drawHand(minuteAngle(q.target), R * 0.8, 16, '#2ec46a', a, false);
-      drawHand(hourAngle(q.target), R * 0.5, 22, '#2ec46a', a * 0.8, false);
+      drawHand(minuteAngle(q.target), R * 0.88, 18, '#2ec46a', a, false);
+      drawHand(hourAngle(q.target), R * 0.54, 24, '#2ec46a', a * 0.8, false);
     }
 
     if (handsHidden) {
@@ -1631,9 +1650,11 @@
       ctx.font = `900 150px ${UI_FONT}`;
       ctx.fillText('?', CX, CY + 8);
     } else {
-      drawHand(hourAngle(disp), R * 0.5, 22, HOUR_COLOR, 1);
-      drawHand(minuteAngle(disp), R * 0.8, 15, MIN_COLOR, 1);
+      drawHand(hourAngle(disp), R * 0.54, 24, HOUR_COLOR, 1);
+      drawHand(minuteAngle(disp), R * 0.88, 16, MIN_COLOR, 1);
     }
+
+    if (q && q.wedge && q.wedgeFrom != null && Math.abs(disp - q.wedgeFrom) >= 0.5) drawWedgeCounter();
 
     // Centre cap
     const cap = ctx.createRadialGradient(CX - 4, CY - 4, 1, CX, CY, 16);
@@ -1679,7 +1700,11 @@
     ctx.stroke();
     ctx.setLineDash([]);
     ctx.restore();
-    // Live counter while the time passes
+  }
+
+  function drawWedgeCounter() {
+    const span = disp - q.wedgeFrom;
+    // Live counter while the time passes (drawn above the hands)
     if (phase === 'feedback') {
       const mins = Math.round(Math.abs(span));
       const text = `${span < 0 ? '−' : '+'} ${durText(mins)}`;
@@ -1708,43 +1733,45 @@
     ctx.fillStyle = '#cbbfa9';
     ctx.fillRect(x - w / 2 + 3, y + 12, w - 6, 3);
     ctx.fillStyle = '#2d2a32';
-    ctx.font = `900 17px ${UI_FONT}`;
+    ctx.font = `900 ${label.length > 2 ? 15 : 17}px ${UI_FONT}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(label, x, y);
   }
   // Which key moves which hand, drawn beside the clock with a tiny picture of each hand.
   function drawHandKeys(x, w, top) {
-    button(x, top, w, 172, { fill: 'rgba(255,255,255,0.92)', edge: '#e2d8c6', shadow: 'rgba(0,0,0,0.08)' });
+    button(x, top, w, 178, { fill: 'rgba(255,255,255,0.94)', edge: '#e2d8c6', shadow: 'rgba(0,0,0,0.08)' });
     const rows = [
-      { y: top + 48, keys: ['←', '→'], color: MIN_COLOR, len: 64, width: 9, text: 'long hand', sub: 'minutes' },
-      { y: top + 124, keys: ['↑', '↓'], color: HOUR_COLOR, len: 40, width: 14, text: 'short hand', sub: 'hour' },
+      { y: top + 16, keys: ['←', '→'], color: MIN_COLOR, len: 92, width: 12, text: 'long hand' },
+      { y: top + 100, keys: ['↑', '↓'], color: HOUR_COLOR, len: 60, width: 18, text: 'short hand' },
     ];
     for (const r of rows) {
-      keycap(x + 30, r.y - 16, r.keys[0]);
-      keycap(x + 30, r.y + 20, r.keys[1]);
-      // mini hand
-      ctx.save();
-      ctx.translate(x + 64, r.y + 2);
-      ctx.rotate(Math.PI / 2);
-      ctx.fillStyle = r.color;
-      ctx.beginPath();
-      ctx.moveTo(-r.width / 2, 6);
-      ctx.lineTo(-r.width / 2, -r.len * 0.72);
-      ctx.lineTo(0, -r.len);
-      ctx.lineTo(r.width / 2, -r.len * 0.72);
-      ctx.lineTo(r.width / 2, 6);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
+      keycap(x + 30, r.y + 20, r.keys[0]);
+      keycap(x + 68, r.y + 20, r.keys[1]);
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       ctx.fillStyle = r.color;
-      ctx.font = `900 19px ${UI_FONT}`;
-      ctx.fillText(r.text, x + 64 + r.len + 8 > x + w - 90 ? x + 76 : x + 76, r.y - 20);
+      ctx.font = `900 18px ${UI_FONT}`;
+      ctx.fillText(r.text, x + 92, r.y + 20);
+      // a little picture of that hand
+      ctx.save();
+      ctx.translate(x + 26, r.y + 54);
+      ctx.rotate(Math.PI / 2);
+      ctx.fillStyle = r.color;
+      ctx.beginPath();
+      ctx.moveTo(-r.width / 2, 0);
+      ctx.lineTo(-r.width / 2, -r.len * 0.6);
+      ctx.lineTo(-r.width * 0.28, -r.len * 0.9);
+      ctx.lineTo(0, -r.len);
+      ctx.lineTo(r.width * 0.28, -r.len * 0.9);
+      ctx.lineTo(r.width / 2, -r.len * 0.6);
+      ctx.lineTo(r.width / 2, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
       ctx.fillStyle = '#6b6475';
       ctx.font = `800 15px ${UI_FONT}`;
-      ctx.fillText(r.sub, x + 76, r.y + 26);
+      ctx.fillText(r.text === 'long hand' ? 'minutes' : 'hour', x + 26 + r.len + 12, r.y + 55);
     }
   }
 
@@ -1792,6 +1819,14 @@
       drawRich(line, b.x + b.w / 2, y, '#2d2a32', '#c2410c');
       y += lh;
     });
+    if (q && phase === 'ask' && state === 'play' && data.settings.voice) {
+      ctx.font = `22px ${EMOJI_FONT}`;
+      ctx.fillStyle = '#000';
+      ctx.globalAlpha = 0.55;
+      ctx.textAlign = 'center';
+      ctx.fillText('🔊', b.x + b.w - 26, b.y + 26);
+      ctx.globalAlpha = 1;
+    }
     if (zhLine) {
       ctx.font = `700 ${zhSize}px ${ZH_FONT}`;
       ctx.fillStyle = '#7a3fb0';
@@ -1832,7 +1867,7 @@
     const w = COL.w;
     if (q.mode === 'set') {
       if (phase === 'ask') {
-        drawHandKeys(x, w, CY - 226);
+        drawHandKeys(x, w, CY - 236);
         // Check button
         const by = CY - 20;
         button(x, by, w, 88, { fill: '#ff7a3d', edge: '#e0642a', shadow: '#c9541f' });
@@ -1859,9 +1894,9 @@
     }
 
     const n = q.options.length;
-    const bh = 92;
-    const gap = 18;
-    const top = CY - (n * bh + (n - 1) * gap) / 2 - 20;
+    const bh = 86;
+    const gap = 14;
+    const top = CY - (n * bh + (n - 1) * gap) / 2 - 40;
     q.options.forEach((opt, i) => {
       const by = top + i * (bh + gap);
       let fill = '#fff';
@@ -1899,35 +1934,27 @@
         ctx.fillText(i === q.answerIdx ? '✅' : '❌', x + w - 14, by + 12);
       }
       if (phase === 'ask') hits.push({ x, y: by, w, h: bh, fn: () => { sel = i; submit(); } });
-      if (phase === 'ask' && i === sel) {
-        // Pointer arrow next to the selected choice
-        ctx.fillStyle = '#4aa8ff';
-        ctx.beginPath();
-        ctx.moveTo(x - 6, by - lift + bh / 2);
-        ctx.lineTo(x - 22, by - lift + bh / 2 - 12);
-        ctx.lineTo(x - 22, by - lift + bh / 2 + 12);
-        ctx.closePath();
-        ctx.fill();
-      }
     });
     if (phase === 'ask') {
-      const y = top + n * (bh + gap) + 14;
-      keycap(x + 40, y, '←');
-      keycap(x + 78, y, '→');
+      const y = top + n * (bh + gap) + 2;
+      ctx.fillStyle = 'rgba(255,255,255,0.88)';
+      roundRect(x, y, w, 44, 14);
+      ctx.fill();
+      keycap(x + 24, y + 21, '←');
+      keycap(x + 60, y + 21, '→');
       ctx.fillStyle = '#4a4458';
-      ctx.font = `800 17px ${UI_FONT}`;
+      ctx.font = `800 16px ${UI_FONT}`;
       ctx.textAlign = 'left';
-      ctx.fillText('then', x + 100, y);
-      keycap(x + 170, y, 'return', 60);
-      if (q.type !== 'ampm' || true) {
-        const hy = y + 40;
-        button(x + 38, hy, w - 76, 46, { fill: '#fffbe6', edge: '#ffe08a', shadow: '#e8d489' });
-        ctx.fillStyle = '#7a5a00';
-        ctx.font = `900 19px ${UI_FONT}`;
-        ctx.textAlign = 'center';
-        ctx.fillText('💡 Hint (H)', x + w / 2, hy + 23);
-        hits.push({ x: x + 38, y: hy, w: w - 76, h: 46, fn: hint });
-      }
+      ctx.textBaseline = 'middle';
+      ctx.fillText('pick', x + 82, y + 21);
+      keycap(x + 164, y + 21, 'return', 64);
+      const hy = y + 56;
+      button(x + 38, hy, w - 76, 46, { fill: '#fffbe6', edge: '#ffe08a', shadow: '#e8d489' });
+      ctx.fillStyle = '#7a5a00';
+      ctx.font = `900 19px ${UI_FONT}`;
+      ctx.textAlign = 'center';
+      ctx.fillText('💡 Hint (H)', x + w / 2, hy + 23);
+      hits.push({ x: x + 38, y: hy, w: w - 76, h: 46, fn: hint });
     } else {
       drawNext(x, w, top + n * (bh + gap) + 6);
     }
@@ -1943,9 +1970,12 @@
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('Next ▶', x + w / 2, by + 35 - pulse);
+    ctx.fillStyle = 'rgba(255,255,255,0.88)';
+    roundRect(x + 40, by + 82, w - 80, 30, 15);
+    ctx.fill();
     ctx.fillStyle = '#4a4458';
     ctx.font = `800 16px ${UI_FONT}`;
-    ctx.fillText('press return', x + w / 2, by + 96);
+    ctx.fillText('press return', x + w / 2, by + 97);
     hits.push({ x, y: by, w, h: 70, fn: advance });
   }
 
@@ -2071,6 +2101,8 @@
       };
     },
     get disp() { return disp; },
+    ask(type, variant) { forcedNext = { type, variant }; if (state === 'play' && phase === 'ask') nextQuestion(); },
+    setLevel(n) { g.level = n; cfg = cfgFor(n); updateHud(); },
     logic: { norm, T, fmt, hourAngle, minuteAngle, zhTime, zhDur, durText, wordsFor, cfgFor, makeQuestion, explainForward, explainBackward, shortest },
   };
 
