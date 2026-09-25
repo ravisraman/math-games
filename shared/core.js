@@ -424,6 +424,13 @@
       this.busy = (async () => {
         try {
           const remote = await this.request('GET', undefined, { timeout: background ? 4000 : 8000 });
+          // The family's cloud copy was erased from another device: stop syncing here too
+          // (instead of quietly re-creating it).
+          if (remote === null && this.lastSync > 0) {
+            this.setState({ code: null, lastSync: 0, pausedUntil: 0, lastError: 'erased' });
+            this.emit({ changed: false });
+            return null;
+          }
           this.lastRemote = remote;
           const local = ensureCounters(readJSON(KEY) || defaults());
           const merged = merge(remote, local);
@@ -527,6 +534,12 @@
       return c;
     },
     stop() { this.setState({ code: null, lastSync: 0, pausedUntil: 0, lastError: '' }); },
+    // Delete the family's copy in the cloud and stop syncing (progress stays on each device).
+    async erase() {
+      if (!this.code) return;
+      await this.request('DELETE');
+      this.stop();
+    },
   };
 
   // Sync when a page opens and whenever the app comes back to the front. If newer progress

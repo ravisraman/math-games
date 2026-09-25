@@ -1,6 +1,6 @@
 /* Math Quest service worker: network-first so updates show up right away,
    with a cached copy of every page so the games also work offline. */
-const CACHE = 'math-quest-v8';
+const CACHE = 'math-quest-v9';
 const FILES = [
   './', 'index.html', 'portal.css', 'portal.js', 'manifest.webmanifest',
   'shared/core.js', 'shared/style.css',

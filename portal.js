@@ -225,6 +225,7 @@
           <input type="text" id="sync-code" placeholder="XXXX-XXXX-XXXX" maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false">
           <button class="btn secondary small" id="sync-join">Join</button>
         </div>
+        ${S.lastError === 'erased' ? '<p class="muted sync-err">Sync was turned off because the cloud copy was erased on another device. Progress on this device is safe.</p>' : ''}
         <p class="sync-msg" id="sync-msg"></p>`;
     }
     return `
@@ -240,6 +241,7 @@
         <button class="btn secondary small" id="sync-now">Sync now</button>
         <button class="btn secondary small" id="sync-copy">Copy code</button>
         <button class="btn secondary small" id="sync-stop">Stop syncing here</button>
+        <button class="btn secondary small" id="sync-erase">Erase cloud copy…</button>
       </div>
       <p class="sync-msg" id="sync-msg"></p>`;
   }
@@ -279,6 +281,12 @@
     });
     on('sync-copy', async () => {
       try { await navigator.clipboard.writeText(MQ.Sync.pretty(MQ.Sync.code)); msg('Code copied.'); } catch (e) { msg('Select and copy the code above.'); }
+    });
+    on('sync-erase', async () => {
+      if (!confirm('Erase the family copy in the cloud? Progress stays on each device, but all devices stop syncing.')) return;
+      msg('Erasing…');
+      try { await MQ.Sync.erase(); redraw(); msg('The cloud copy is erased. Progress is still on this device.'); }
+      catch (e) { msg('Could not reach the sync service — try again when online.', true); }
     });
     on('sync-stop', () => {
       if (!confirm('Stop syncing on this device? Progress stays here, but it will no longer update from the other device.')) return;

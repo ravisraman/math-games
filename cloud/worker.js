@@ -5,6 +5,10 @@
    Bindings: SYNC (KV namespace "math-quest-sync"), AI (Workers AI). */
 
 const SITE = 'https://ravisraman.github.io';
+// Note: the Origin check stops other websites from using this Worker from a browser; it is not a
+// password (any script can fake an Origin). The unguessable 12-letter family code protects saves.
+const GAME_IDS = ['coinCrossing', 'numberFlow', 'clockTower', 'castleClimb'];
+const SAVE_TTL = 60 * 60 * 24 * 400; // a family's save is removed after 400 days without any sync
 const NEW_PHRASES_PER_MINUTE = 40; // per visitor address, to protect the free Workers AI allowance
 const recent = new Map(); // ip -> timestamps of recently generated phrases (per Worker instance)
 const VOICES = ['luna', 'thalia', 'athena', 'helena', 'apollo', 'arcas', 'aurora', 'cora', 'hera', 'orion'];
@@ -16,7 +20,7 @@ function corsFor(req) {
     ok,
     headers: {
       'Access-Control-Allow-Origin': ok ? origin : SITE,
-      'Access-Control-Allow-Methods': 'GET, PUT, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, PUT, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
       'Access-Control-Max-Age': '86400',
       Vary: 'Origin',
@@ -52,6 +56,29 @@ async function toBytes(result) {
   throw new Error('unexpected TTS result');
 }
 
+// Only cache real audio (an MP3 frame / ID3 tag, or a WAV header) of a sensible size.
+function looksLikeAudio(bytes) {
+  if (!bytes || bytes.length < 500) return false;
+  const id3 = bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33;
+  const mp3 = bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0;
+  const wav = bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46;
+  return id3 || mp3 || wav;
+}
+
+// Daily free allowance used up (or another permanent problem): don't retry, tell the game at once.
+function isQuotaError(e) {
+  return /4006|allocation|neurons|quota|limit|exceeded|429/i.test(String((e && e.message) || e));
+}
+
+// Is this a well-formed Math Quest save?
+function validSave(d) {
+  if (!d || typeof d !== 'object' || Array.isArray(d)) return false;
+  if (!d.games || typeof d.games !== 'object' || Array.isArray(d.games)) return false;
+  if (Object.keys(d.games).some((id) => !GAME_IDS.includes(id))) return false;
+  if (d.player && (typeof d.player !== 'object' || String(d.player.hero || '').length > 8 || String(d.player.name || '').length > 40)) return false;
+  return true;
+}
+
 function audioType(bytes) {
   // MeloTTS returns WAV, Aura-2 returns MP3.
   return bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 ? 'audio/wav' : 'audio/mpeg';
@@ -74,20 +101,23 @@ async function tts(url, env, headers, req, ctx) {
   if (!text) return json({ error: 'no text' }, 400, headers);
 
   const key = 'tts:' + (await sha256(`${lang}|${lang === 'en' ? voice : 'melo'}|${text}`));
-  const audioHeaders = (bytes) => ({ ...headers, 'Content-Type': audioType(bytes), 'Cache-Control': 'public, max-age=31536000, immutable' });
+  const audioHeaders = (bytes) => ({ ...headers, 'Content-Type': audioType(bytes), 'Cache-Control': 'public, max-age=2592000' });
   const cached = await env.SYNC.get(key, 'arrayBuffer');
   if (cached) return new Response(cached, { headers: { ...audioHeaders(new Uint8Array(cached)), 'X-Cache': 'hit' } });
   if (!allowNewPhrase(req.headers.get('CF-Connecting-IP') || 'unknown')) return json({ error: 'slow down' }, 429, headers);
 
-  // The voice models occasionally return a transient "internal server error"; try up to 3 times.
+  // The voice models occasionally return a transient "internal server error" or bad audio; try up
+  // to 3 times. A used-up daily allowance is not retried: the game switches to the device voice.
   let bytes;
   for (let attempt = 0; ; attempt++) {
     try {
       bytes = lang === 'zh'
         ? await toBytes(await env.AI.run('@cf/myshell-ai/melotts', { prompt: text, lang: 'zh' }))
         : await toBytes(await env.AI.run('@cf/deepgram/aura-2-en', { text, speaker: voice, encoding: 'mp3' }));
+      if (!looksLikeAudio(bytes)) throw new Error('not audio');
       break;
     } catch (e) {
+      if (isQuotaError(e)) return json({ error: 'ai-quota' }, 503, headers);
       if (attempt >= 2) throw e;
       await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
     }
@@ -115,10 +145,21 @@ export default {
           if (!cors.ok) return json({ error: 'forbidden' }, 403, cors.headers);
           const body = await req.text();
           if (body.length > 600000) return json({ error: 'too big' }, 413, cors.headers);
-          const parsed = JSON.parse(body);
-          if (!parsed || typeof parsed !== 'object' || typeof parsed.games !== 'object') return json({ error: 'bad save' }, 400, cors.headers);
-          await env.SYNC.put(key, body);
+          let parsed;
+          try { parsed = JSON.parse(body); } catch (e) { return json({ error: 'bad save' }, 400, cors.headers); }
+          if (!validSave(parsed)) return json({ error: 'bad save' }, 400, cors.headers);
+          try {
+            await env.SYNC.put(key, body, { expirationTtl: SAVE_TTL });
+          } catch (e) {
+            // Most likely the free plan's daily write limit: the game pauses sync until tomorrow.
+            return json({ error: 'quota' }, 503, cors.headers);
+          }
           return json({ ok: true, at: Date.now() }, 200, cors.headers);
+        }
+        if (req.method === 'DELETE') {
+          if (!cors.ok) return json({ error: 'forbidden' }, 403, cors.headers);
+          await env.SYNC.delete(key);
+          return json({ ok: true }, 200, cors.headers);
         }
       }
       if (url.pathname === '/tts' && req.method === 'GET') {
