@@ -2,10 +2,17 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Math Quest">
+  <meta name="theme-color" content="#fff8ec">
+  <link rel="manifest" href="../../manifest.webmanifest">
+  <link rel="apple-touch-icon" href="../../icons/icon-180.png">
   <title>Castle Climb</title>
-  <link rel="stylesheet" href="../../shared/style.css?v=5">
-  <link rel="stylesheet" href="game.css?v=5">
+  <link rel="stylesheet" href="../../shared/style.css?v=6">
+  <link rel="stylesheet" href="game.css?v=6">
 </head>
 <body>
   <main class="layout">
@@ -38,17 +45,24 @@
         <span id="message">Let's climb the tower!</span>
       </section>
 
-      <section class="controls">
+      <section class="controls keys-only">
         <div><span class="key">←</span><span class="key">→</span> walk under an answer</div>
         <div><span class="key">↑</span> or <span class="key">space</span> jump up</div>
         <div><span class="key">↓</span> hear it again · <span class="key">H</span> hint</div>
         <div><span class="key">esc</span> pause · <span class="key">M</span> music on / off</div>
       </section>
+
+      <nav class="touchbar" aria-label="Game buttons">
+        <button type="button" data-act="hear" aria-label="Hear it again" title="Hear it again">🔊</button>
+        <button type="button" data-act="hint" aria-label="Hint" title="Hint">💡</button>
+        <button type="button" data-act="pause" aria-label="Pause" title="Pause">⏸️</button>
+        <button type="button" data-act="music" aria-label="Music on or off" title="Music on / off">🎵</button>
+      </nav>
     </aside>
   </main>
 
-  <script src="../../shared/core.js?v=5"></script>
-  <script src="problems.js?v=5"></script>
-  <script src="game.js?v=5"></script>
+  <script src="../../shared/core.js?v=6"></script>
+  <script src="problems.js?v=6"></script>
+  <script src="game.js?v=6"></script>
 </body>
 </html>

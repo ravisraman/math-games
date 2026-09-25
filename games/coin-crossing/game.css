@@ -1,5 +1,9 @@
 html, body { height: 100%; overflow: hidden; }
-body { background: linear-gradient(180deg, #bfe8ff 0%, #e8f7ff 100%); }
+body {
+  height: 100vh;
+  height: 100dvh;
+  background: linear-gradient(180deg, #bfe8ff 0%, #e8f7ff 100%);
+}
 
 .layout {
   height: 100%;
@@ -27,6 +31,10 @@ body { background: linear-gradient(180deg, #bfe8ff 0%, #e8f7ff 100%); }
   gap: 10px;
   max-height: 100%;
 }
+
+.stage-wrap { display: contents; }
+.hud { display: flex; flex-direction: column; gap: 10px; }
+.need2 { display: none; }
 
 .panel-top { display: flex; align-items: center; gap: 8px; }
 .home {
@@ -156,3 +164,276 @@ body { background: linear-gradient(180deg, #bfe8ff 0%, #e8f7ff 100%); }
   .layout { flex-direction: column; }
   .panel { width: 100%; max-width: 600px; }
 }
+
+/* ---------- Touch buttons (phones, tablets) ---------- */
+.touchbar { display: none; gap: 8px; }
+html.touch .touchbar, html.lay-port .touchbar, html.lay-land .touchbar { display: flex; }
+html.touch .controls { display: none; }
+.tbtn {
+  min-width: 52px;
+  min-height: 52px;
+  border: none;
+  border-radius: 16px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 26px;
+  font-weight: 800;
+  box-shadow: 0 4px 0 #cbd9e6;
+  touch-action: manipulation;
+  transition: transform 0.08s;
+}
+.tbtn:active, .tbtn.pressed { transform: translateY(3px); box-shadow: 0 1px 0 #cbd9e6; }
+.tbtn.back {
+  flex: 1;
+  font-size: 20px;
+  background: #ffe6a8;
+  box-shadow: 0 4px 0 #e2b54f;
+  color: #7a4a00;
+  white-space: nowrap;
+}
+.tbtn.back:active, .tbtn.back.pressed { box-shadow: 0 1px 0 #e2b54f; }
+.tbtn.back.empty { opacity: 0.55; }
+.tbtn.off { opacity: 0.6; }
+.card .go { margin-top: 14px; min-height: 56px; min-width: 180px; font-size: 22px; font-weight: 900; }
+.card .go.full { width: 100%; }
+
+/* Board surface: swipes and taps never scroll or zoom the page. */
+#board { touch-action: none; }
+html.lay-port .stage-wrap, html.lay-land .stage-wrap { touch-action: none; }
+
+/* One-time "tap to hop, swipe to turn" hint */
+.touch-hint {
+  position: absolute;
+  left: 50%;
+  top: 34%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+  z-index: 3;
+  animation: hint-in 0.3s ease-out;
+}
+.touch-hint[hidden] { display: none; }
+.touch-hint .finger {
+  font-size: 58px;
+  line-height: 1;
+  filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.35));
+  animation: finger 3.2s ease-in-out infinite;
+}
+.touch-hint .hint-text {
+  background: rgba(255, 255, 255, 0.94);
+  border: 3px solid #ffe08a;
+  border-radius: 16px;
+  padding: 6px 14px;
+  font-size: 19px;
+  font-weight: 900;
+  text-align: center;
+  line-height: 1.3;
+  white-space: nowrap;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.18);
+}
+@keyframes hint-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes finger {
+  0%, 8% { transform: translate(0, 0) scale(1); }
+  14% { transform: translate(0, 8px) scale(0.86); }
+  22% { transform: translate(0, -26px) scale(1); }
+  32% { transform: translate(0, 0); }
+  45% { transform: translate(0, 0); }
+  60% { transform: translate(-60px, 0) rotate(-12deg); }
+  66% { transform: translate(-60px, 0); }
+  70% { transform: translate(0, 0); }
+  82% { transform: translate(60px, 0) rotate(12deg); }
+  88% { transform: translate(60px, 0); }
+  100% { transform: translate(0, 0); }
+}
+
+/* ======================================================================
+   Phone layouts. JS puts lay-port / lay-land / lay-desk on <html>.
+   ====================================================================== */
+html.lay-port .layout, html.lay-land .layout {
+  display: grid;
+  align-items: stretch;
+  justify-content: stretch;
+  gap: 6px;
+  padding:
+    max(6px, env(safe-area-inset-top))
+    max(8px, env(safe-area-inset-right))
+    max(6px, env(safe-area-inset-bottom))
+    max(8px, env(safe-area-inset-left));
+}
+html.lay-port .panel, html.lay-land .panel { display: contents; }
+html.lay-port .controls, html.lay-land .controls { display: none; }
+html.lay-port .stage-wrap, html.lay-land .stage-wrap {
+  grid-area: stage;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+html.lay-port .stage, html.lay-land .stage { border-radius: 14px; box-shadow: 0 6px 18px rgba(20, 60, 100, 0.25); }
+html.lay-port .need2, html.lay-land .need2 { display: block; }
+html.lay-port .pouch-box .need, html.lay-land .pouch-box .need { display: none; }
+html.lay-port .level-pill, html.lay-port .star-pill, html.lay-land .level-pill, html.lay-land .star-pill {
+  font-size: 17px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+}
+html.lay-port .home, html.lay-land .home {
+  min-width: 44px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  padding: 0;
+}
+html.lay-port .box, html.lay-land .box { padding: 4px 10px; border-radius: 14px; }
+html.lay-port .need, html.lay-land .need { font-size: 14px; margin-top: 0; min-height: 0; line-height: 1.2; }
+html.lay-port .pouch-coins, html.lay-land .pouch-coins { zoom: 0.72; gap: 4px; margin-top: 0; }
+
+/* The panda's message becomes a small toast over the top of the board. */
+html.lay-port .bubble, html.lay-land .bubble {
+  grid-area: stage;
+  align-self: start;
+  justify-self: center;
+  z-index: 5;
+  width: min(var(--board-w, 100%), 100%);
+  max-width: 100%;
+  margin-top: 4px;
+  min-height: 0;
+  padding: 5px 10px;
+  gap: 8px;
+  align-items: center;
+  font-size: 15px;
+  line-height: 1.25;
+  border-width: 2px;
+  border-radius: 14px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-8px);
+  transition: opacity 0.25s, transform 0.25s;
+}
+html.lay-port .bubble .mascot, html.lay-land .bubble .mascot { font-size: 24px; }
+html.lay-port .bubble.show, html.lay-land .bubble.show { opacity: 1; transform: none; }
+/* When the hero is up near the castle, the toast moves to the bottom so the castle stays visible. */
+html.lay-port .bubble.low, html.lay-land .bubble.low { align-self: end; margin: 0 0 4px; transform: translateY(8px); }
+html.lay-port .bubble.low.show, html.lay-land .bubble.low.show { transform: none; }
+html.lay-port .lvl-word, html.lay-land .lvl-word { margin-right: 4px; }
+html.lay-port .bubble.pop, html.lay-land .bubble.pop { animation: none; }
+
+/* Overlay cards cover the whole phone screen (not just the board) so they have room. */
+html.lay-port .overlay, html.lay-land .overlay {
+  position: fixed;
+  z-index: 20;
+  padding:
+    max(10px, env(safe-area-inset-top))
+    max(10px, env(safe-area-inset-right))
+    max(10px, env(safe-area-inset-bottom))
+    max(10px, env(safe-area-inset-left));
+}
+html.lay-port .card, html.lay-land .card {
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 18px 16px;
+  touch-action: pan-y;
+}
+html.lay-port .card h1 { font-size: 30px; }
+html.lay-port .card p { font-size: 18px; }
+html.lay-port .card .stats { flex-wrap: wrap; gap: 4px 14px; }
+html.lay-port .choices, html.lay-land .choices { gap: 10px; flex-wrap: nowrap; }
+html.lay-port .choice, html.lay-land .choice { min-width: 0; flex: 1 1 0; min-height: 64px; padding: 10px 6px; font-size: 24px; }
+html.lay-port .quiz-q { font-size: 26px; }
+html.lay-port .quiz-visual { font-size: 36px; }
+
+/* ---- Portrait phone: top strip / board / bottom button bar ---- */
+html.lay-port .layout {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas: "hud" "stage" "bar";
+}
+html.lay-port .hud {
+  grid-area: hud;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  grid-template-areas: "home level target star" "pouch pouch pouch pouch";
+  gap: 6px;
+}
+html.lay-port .panel-top { display: contents; }
+html.lay-port .home { grid-area: home; }
+html.lay-port .level-pill { grid-area: level; }
+html.lay-port .star-pill { grid-area: star; margin: 0; }
+html.lay-port .level-pill .lvl-word { font-size: 14px; }
+html.lay-port .target-box {
+  grid-area: target;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas: "label big" "need need";
+  align-items: center;
+  column-gap: 6px;
+  height: 50px;
+  padding: 2px 10px;
+  overflow: hidden;
+}
+html.lay-port .target-box .label { grid-area: label; font-size: 14px; line-height: 1.1; white-space: nowrap; }
+html.lay-port .target-box .big { grid-area: big; font-size: 26px; white-space: nowrap; }
+html.lay-port .target-box .need2 { grid-area: need; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.lay-port .zh.sub { display: none; }
+html.lay-port .pouch-box {
+  grid-area: pouch;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  overflow: hidden;
+}
+html.lay-port .pouch-box .label { font-size: 14px; white-space: nowrap; flex: none; }
+html.lay-port .pouch-box .big { font-size: 26px; flex: none; }
+html.lay-port .pouch-box .pouch-coins { flex-wrap: nowrap; overflow: hidden; min-height: 0; min-width: 0; }
+html.lay-port .touchbar { grid-area: bar; }
+html.lay-port .tbtn { min-height: 54px; min-width: 64px; }
+
+/* ---- Landscape phone: board on the left, slim column on the right ---- */
+html.lay-land .layout {
+  grid-template-columns: minmax(0, 1fr) 208px;
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-areas: "stage hud" "stage bar";
+  column-gap: 10px;
+}
+html.lay-land .hud { grid-area: hud; gap: 6px; min-height: 0; overflow: hidden; }
+html.lay-land .panel-top { gap: 6px; }
+html.lay-land .level-pill, html.lay-land .star-pill { padding: 0 10px; font-size: 16px; }
+html.lay-land .label { font-size: 14px; }
+html.lay-land .big { font-size: 28px; }
+html.lay-land .sub { font-size: 14px; min-height: 0; }
+html.lay-land .pouch-coins { min-height: 0; }
+html.lay-land .touchbar { grid-area: bar; gap: 6px; }
+html.lay-land .tbtn { min-width: 48px; min-height: 50px; font-size: 22px; padding: 0 4px; }
+html.lay-land .touchbar { flex-wrap: wrap; }
+html.lay-land .tbtn.back { flex: 1 0 100%; font-size: 19px; }
+html.lay-land .tbtn.icon { flex: 1; }
+html.lay-land .card { max-width: 560px; padding: 12px 18px; }
+html.lay-land .card h1 { font-size: 24px; margin-bottom: 0; }
+html.lay-land .card h2 { font-size: 22px; margin-bottom: 2px; }
+html.lay-land .card p { font-size: 16px; margin: 4px 0; }
+html.lay-land .card .goal { font-size: 34px; }
+html.lay-land .card .legend { margin: 6px 0; }
+html.lay-land .card .hint { font-size: 14px; }
+html.lay-land .card .stars-row { font-size: 38px; margin: 0; }
+html.lay-land .card .praise { font-size: 22px; }
+html.lay-land .card .go { margin-top: 8px; min-height: 50px; }
+html.lay-land .quiz-q { font-size: 24px; margin: 2px 0; }
+html.lay-land .quiz-visual { font-size: 30px; margin: 4px 0; }
+html.lay-land .choices { margin-top: 8px; }
+html.lay-land .choice { min-height: 54px; }
+html.lay-land .explain { margin-top: 6px; font-size: 16px; }
+html.lay-land .touch-hint .finger { font-size: 46px; }
+html.lay-land .touch-hint .hint-text { font-size: 16px; }

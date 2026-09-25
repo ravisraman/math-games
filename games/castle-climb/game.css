@@ -1,8 +1,10 @@
 html, body { height: 100%; overflow: hidden; }
+body { height: 100vh; height: 100dvh; }
 body { background: linear-gradient(180deg, #ffe3c4 0%, #fff4e4 55%, #ffeede 100%); }
 
 .layout {
   height: 100%;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -151,3 +153,133 @@ body { background: linear-gradient(180deg, #ffe3c4 0%, #fff4e4 55%, #ffeede 100%
   .layout { flex-direction: column; }
   .panel { width: 100%; max-width: 600px; }
 }
+
+/* ---------- On-screen buttons (touch) ---------- */
+.touchbar { display: flex; gap: 8px; }
+html.no-touch.lay-wide .touchbar { display: none; }
+.touchbar button {
+  flex: 1 1 0;
+  min-width: 44px;
+  height: 52px;
+  border: none;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 3px 0 #ecd2b5;
+  font-size: 26px;
+  line-height: 1;
+  padding: 0;
+  touch-action: manipulation;
+  transition: transform 0.08s, background 0.15s;
+}
+.touchbar button:active { transform: translateY(3px); box-shadow: 0 0 0 #ecd2b5; background: #fff3d6; }
+.touchbar button.on { background: #ffe07a; box-shadow: 0 3px 0 #d9a800; }
+.touchbar button.off { filter: grayscale(1); opacity: 0.45; }
+#board { touch-action: none; }
+.stage { touch-action: none; }
+.card .btn.go { margin-top: 16px; min-height: 52px; font-size: 22px; padding: 12px 30px; }
+.card .how .keys:only-child { font-size: 34px; }
+
+/* ---------- Phone, held upright: HUD strip on top, big scene, button bar at the bottom ---------- */
+html.lay-portrait .layout {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: max(6px, env(safe-area-inset-top)) env(safe-area-inset-right) max(8px, env(safe-area-inset-bottom)) env(safe-area-inset-left);
+}
+html.lay-portrait .panel { display: contents; }
+html.lay-portrait .panel-top { order: 0; padding: 0 10px; gap: 8px; }
+html.lay-portrait .home { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; padding: 0; font-size: 24px; }
+html.lay-portrait .level-pill, html.lay-portrait .star-pill { font-size: 18px; padding: 8px 14px; }
+html.lay-portrait .problem-box, html.lay-portrait .controls { display: none; }
+html.lay-portrait .floor-box { order: 1; margin: 0 10px; padding: 4px 6px; border-radius: 14px; }
+html.lay-portrait .floor-box .label, html.lay-portrait .floor-box .tally { display: none; }
+html.lay-portrait .track { margin: 0; gap: 3px; }
+html.lay-portrait .track span { height: 26px; font-size: 14px; }
+html.lay-portrait .stage {
+  order: 2;
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  border-radius: 0;
+  box-shadow: none;
+}
+html.lay-portrait #board, html.lay-landscape #board { position: absolute; left: 0; top: 0; }
+html.lay-portrait .touchbar { order: 3; padding: 0 10px; flex: none; }
+html.lay-portrait .bubble {
+  position: absolute;
+  left: max(10px, env(safe-area-inset-left));
+  right: max(10px, env(safe-area-inset-right));
+  bottom: calc(max(8px, env(safe-area-inset-bottom)) + 52px + 6px + 10px);
+  z-index: 5;
+  min-height: 0;
+  padding: 6px 10px;
+  font-size: 16px;
+  line-height: 1.3;
+  align-items: center;
+  box-shadow: 0 4px 12px rgba(80, 40, 10, 0.25);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+html.lay-portrait .bubble.show { opacity: 1; }
+html.lay-portrait .layout:has(.overlay:not([hidden])) .bubble { opacity: 0; }
+html.lay-portrait .bubble .mascot { font-size: 24px; }
+
+/* ---------- Phone, held sideways: scene on the left, slim column on the right ---------- */
+html.lay-landscape .layout {
+  flex-direction: row;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: max(6px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+}
+html.lay-landscape .stage { flex: 1 1 0; min-width: 0; border-radius: 14px; }
+html.lay-landscape .panel { width: 196px; max-width: none; max-height: none; gap: 6px; min-height: 0; }
+html.lay-landscape .problem-box, html.lay-landscape .controls { display: none; }
+html.lay-landscape .panel-top { gap: 6px; }
+html.lay-landscape .home { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; padding: 0; font-size: 22px; flex: none; }
+html.lay-landscape .level-pill, html.lay-landscape .star-pill { font-size: 16px; padding: 6px 10px; white-space: nowrap; }
+html.lay-landscape .floor-box { padding: 5px 8px; border-radius: 14px; flex: none; }
+html.lay-landscape .floor-box .label { font-size: 14px; }
+html.lay-landscape .floor-box .tally { display: none; }
+html.lay-landscape .track { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; margin: 4px 0 2px; }
+html.lay-landscape .track span { height: 22px; font-size: 14px; }
+html.lay-landscape .bubble { flex: 1 1 auto; min-height: 0; overflow: hidden; font-size: 15px; padding: 6px 8px; gap: 6px; }
+html.lay-landscape .bubble .mascot { font-size: 24px; }
+html.lay-landscape .touchbar { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; flex: none; }
+html.lay-landscape .touchbar button { height: 46px; }
+
+/* ---------- Overlay cards on phones ---------- */
+html.lay-portrait .overlay, html.lay-landscape .overlay { padding: 12px; }
+html.lay-portrait .card, html.lay-landscape .card {
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 16px 16px 18px;
+  border-radius: 20px;
+}
+html.lay-portrait .card h1 { font-size: 27px; }
+html.lay-portrait .card h2 { font-size: 23px; }
+html.lay-portrait .card .goal { font-size: 22px; }
+html.lay-portrait .card .example { font-size: 26px; }
+html.lay-portrait .card .stars-row { font-size: 44px; letter-spacing: 4px; }
+html.lay-portrait .card .praise { font-size: 25px; }
+html.lay-portrait .card .stats { font-size: 16px; gap: 4px 12px; }
+html.lay-portrait .card .hint { font-size: 16px; }
+html.lay-portrait .card .next { font-size: 16px; }
+html.lay-landscape .card { max-width: 460px; padding: 12px 16px 14px; }
+html.lay-landscape .card h1 { font-size: 23px; margin-bottom: 2px; }
+html.lay-landscape .card h2 { font-size: 20px; margin-bottom: 2px; }
+html.lay-landscape .card .goal { font-size: 19px; }
+html.lay-landscape .card .goal-zh { font-size: 16px; }
+html.lay-landscape .card .example { font-size: 21px; margin-top: 4px; }
+html.lay-landscape .card .how { margin: 6px 0 2px; }
+html.lay-landscape .card p { font-size: 16px; margin: 4px 0; }
+html.lay-landscape .card .hint { font-size: 15px; line-height: 1.35; }
+html.lay-landscape .card .stars-row { font-size: 32px; margin: 2px 0; }
+html.lay-landscape .card .praise { font-size: 20px; }
+html.lay-landscape .card .praise small { font-size: 14px; }
+html.lay-landscape .card .stats { font-size: 14px; margin-top: 4px; gap: 2px 12px; }
+html.lay-landscape .card .next { font-size: 15px; margin-top: 4px; }
+html.lay-landscape .card .btn.go { margin-top: 8px; min-height: 46px; font-size: 19px; padding: 8px 24px; }
+html.lay-landscape .menu { gap: 8px; margin-top: 8px; }

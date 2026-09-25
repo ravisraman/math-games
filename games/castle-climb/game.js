@@ -5,16 +5,29 @@
   'use strict';
 
   const GAME_ID = 'castleClimb';
-  const W = 880;
-  const H = 760;
+  // The scene is drawn in logical units. Laptop: a fixed 880×760 board. Phones: the board
+  // stretches to fill the screen (portrait: ~440 wide; landscape: ~560 tall) — see resize().
+  let W = 880;
+  let H = 760;
   const FH = 230; // height of one floor
-  const HERO_Y = 650; // screen y of the floor he stands on (camera at rest)
+  let HERO_Y = 650; // screen y of the floor he stands on (camera at rest)
   const FLOORS = 10;
   const MAX_LEVEL = 15;
-  const TX0 = 172;
-  const TX1 = 708;
-  const TW = TX1 - TX0;
-  const TCX = (TX0 + TX1) / 2;
+  let TX0 = 172;
+  let TX1 = 708;
+  let TW = TX1 - TX0;
+  let TCX = (TX0 + TX1) / 2;
+  let layout = 'wide'; // wide (laptop) | portrait (phone upright) | landscape (phone sideways)
+  function setGeometry(w, h) {
+    W = w;
+    H = h;
+    TW = Math.min(536, W - 40);
+    TX0 = (W - TW) / 2;
+    TX1 = TX0 + TW;
+    TCX = (TX0 + TX1) / 2;
+    HERO_Y = layout === 'wide' ? 650 : Math.round(H - clamp(H * 0.145, 80, 110));
+  }
+  const touchUI = () => MQ.isTouch;
   const LEDGE_H = 66;
   const SIDE_T = 0.15;
   const JUMP_T = 0.56;
@@ -112,17 +125,18 @@
   const camOff = () => HERO_Y + cam * FH;
   const sy = (f) => camOff() - f * FH; // screen y of a floor's walking surface
   const laneX = (i) => TX0 + (TW * (i + 0.5)) / lanes;
-  const ledgeW = () => (lanes === 3 ? 150 : 116);
+  const ledgeW = () => Math.min(lanes === 3 ? 150 : 116, TW / lanes - 10);
+  const eaveExt = (n) => Math.min(n, Math.max(14, TX0 - 4));
 
   // Scenery that stays the same for the whole visit.
   const clouds = Array.from({ length: 16 }, (_, i) => ({
-    x: frand(-100, W + 100),
+    x: frand(-100, 980),
     yb: 640 - i * 150 - frand(0, 80),
     s: frand(0.7, 1.35),
     v: frand(5, 13) * (Math.random() < 0.5 ? 1 : -1),
     puffs: Array.from({ length: 4 }, (_, k) => ({ dx: (k - 1.5) * 30 + frand(-6, 6), r: frand(20, 34) })),
   }));
-  const skyStars = Array.from({ length: 70 }, () => ({ x: frand(0, W), y: frand(0, H * 0.75), r: frand(0.8, 2.2), tw: frand(0, 6) }));
+  const skyStars = Array.from({ length: 70 }, () => ({ x: frand(0, 1), y: frand(0, 0.75), r: frand(0.8, 2.2), tw: frand(0, 6) }));
 
   // ---------- A new climb ----------
   function newClimb() {
@@ -202,7 +216,7 @@
   function announce() {
     if (!problem) return;
     const again = problem.source === 'retry' ? 'This one came back! ' : '';
-    say(`${again}What is the answer? Walk under it and jump! ⬆`);
+    say(touchUI() ? `${again}Tap the right answer to jump! 👆` : `${again}What is the answer? Walk under it and jump! ⬆`);
     MQ.Voice.say(problem.speak, 'en-US', { interrupt: true });
   }
 
@@ -228,7 +242,9 @@
     const b = el('bubble');
     b.classList.remove('pop');
     void b.offsetWidth;
-    b.classList.add('pop');
+    b.classList.add('pop', 'show');
+    clearTimeout(say.timer); // phones show the panda's message as a short toast over the scene
+    say.timer = setTimeout(() => b.classList.remove('show'), Math.min(7000, 2600 + text.length * 45));
     if (speak) MQ.Voice.say(speakable(text), 'en-US', { interrupt: true });
   }
 
@@ -259,6 +275,7 @@
     MQ.applySettings(data.settings);
     persist();
     say(data.settings.music ? '🎵 Music on' : '🔇 Music off');
+    syncBar();
   }
 
   function toggleHint() {
@@ -269,6 +286,7 @@
       say(`💡 ${text}`);
       MQ.Voice.say(speakable(text), 'en-US', { interrupt: true });
     }
+    syncBar();
   }
 
   function readAgain() {
@@ -305,7 +323,7 @@
     if (!ledge.alive) {
       MQ.Sound.nope();
       heroP.sq = -0.2;
-      say('That ledge fell down. Walk ⬅ ➡ to another one!');
+      say(touchUI() ? 'That ledge fell down. Tap another one!' : 'That ledge fell down. Walk ⬅ ➡ to another one!');
       return;
     }
     state = 'jump';
@@ -323,20 +341,80 @@
     dust(laneX(heroP.lane), sy(floor), 5);
   }
 
-  canvas.addEventListener('pointerdown', (e) => {
-    if (state !== 'play' || !problem) return;
+  // Tap / click a ledge: it lights up while the finger is down (slide to change your mind),
+  // and he walks under it and jumps when the finger lifts. Taps during a hop or jump are ignored.
+  let pressLane = -1;
+  let pressOnLedge = false;
+  let pressId = null;
+  let tapHintOn = false;
+  function hitTest(e) {
     const r = canvas.getBoundingClientRect();
     const x = ((e.clientX - r.left) / r.width) * W;
     const y = ((e.clientY - r.top) / r.height) * H;
-    if (x < TX0 || x > TX1) return;
+    const slack = TX0 < 60 ? TX0 : 0; // phones: the outer edges count too
+    if (x < TX0 - slack || x > TX1 + slack) return null;
     const lane = clamp(Math.floor(((x - TX0) / TW) * lanes), 0, lanes - 1);
     const ly = sy(floor + 1);
-    const onLedge = Math.abs(x - laneX(lane)) <= ledgeW() / 2 && y >= ly - 30 && y <= ly + LEDGE_H + 20;
+    const touch = e.pointerType === 'touch' || e.pointerType === 'pen';
+    const onLedge = touch
+      ? Math.abs(x - laneX(lane)) <= TW / lanes / 2 + 2 && y >= ly - 70 && y <= ly + LEDGE_H + 60
+      : Math.abs(x - laneX(lane)) <= ledgeW() / 2 && y >= ly - 30 && y <= ly + LEDGE_H + 20;
+    return { lane, onLedge };
+  }
+  const canTap = () => state === 'play' && problem && heroP.t >= 1 && !queuedJump;
+  canvas.addEventListener('pointerdown', (e) => {
+    if (pressId !== null || !canTap()) return;
+    const hit = hitTest(e);
+    if (!hit) return;
     idleClock = 0;
-    if (heroP.t < 1) return;
+    pressId = e.pointerId;
+    pressLane = hit.lane;
+    pressOnLedge = hit.onLedge;
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    if (pressOnLedge) MQ.Sound.click();
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== pressId) return;
+    const hit = hitTest(e);
+    if (hit && hit.lane !== pressLane) { pressLane = hit.lane; pressOnLedge = hit.onLedge || pressOnLedge; if (pressOnLedge) MQ.Sound.click(); }
+  });
+  function endPress(e, cancel) {
+    if (e.pointerId !== pressId) return;
+    const lane = pressLane;
+    const onLedge = pressOnLedge;
+    pressId = null;
+    pressLane = -1;
+    pressOnLedge = false;
+    if (cancel || !canTap()) return;
+    idleClock = 0;
+    if (onLedge && tapHintOn) { tapHintOn = false; g.tapHintDone = true; persist(); }
     if (lane !== heroP.lane) { moveTo(lane); if (onLedge) queuedJump = true; }
     else if (onLedge) jump();
+  }
+  canvas.addEventListener('pointerup', (e) => endPress(e, false));
+  canvas.addEventListener('pointercancel', (e) => endPress(e, true));
+
+  // On-screen buttons (phones / touch): hear again, hint, pause, music.
+  const barActions = {
+    hear: () => { if (PLAYING.has(state)) readAgain(); },
+    hint: () => { if (PLAYING.has(state)) toggleHint(); },
+    pause: () => { if (PLAYING.has(state)) showPause(); },
+    music: () => toggleMusic(),
+  };
+  document.querySelectorAll('.touchbar [data-act]').forEach((b) => {
+    b.addEventListener('click', () => {
+      MQ.Sound.ensure();
+      if (b.dataset.act !== 'music') MQ.Sound.click();
+      barActions[b.dataset.act]();
+      b.blur();
+    });
   });
+  function syncBar() {
+    const m = document.querySelector('.touchbar [data-act="music"]');
+    if (m) m.classList.toggle('off', data.settings.music === false);
+    const h = document.querySelector('.touchbar [data-act="hint"]');
+    if (h) h.classList.toggle('on', hintOn);
+  }
 
   // ---------- Right and wrong ----------
   function land() {
@@ -382,7 +460,7 @@
     state = 'climb';
     climbT = 0;
     camFrom = cam;
-    camTo = floor >= FLOORS ? FLOORS + 0.45 : floor;
+    camTo = floor >= FLOORS ? FLOORS + (layout === 'wide' ? 0.45 : (H - 8 - HERO_Y) / FH) : floor;
     updateHud();
   }
 
@@ -506,7 +584,8 @@
         ${practice.length ? `<p class="hint">Keep practicing: <b>${practice.map(MQ.escapeHtml).join(' · ')}</b></p>` : '<p class="hint">No wrong jumps at all! 🌟</p>'}
         <div class="next ${move.kind}">${move.text}</div>
         ${newHero ? `<div class="next">🎉 New hero unlocked: ${newHero.emoji} ${newHero.name}! Pick it in the portal.</div>` : ''}
-        <div class="press">Press <span class="key">return</span> to climb again</div>
+        <div class="press keys-only">Press <span class="key">return</span> to climb again</div>
+        <button class="btn go touch-only">Climb again ▶</button>
       </div>`,
       (k) => { if (k === 'Enter' || k === ' ') { MQ.Sound.click(); newClimb(); showIntro(); } }, true
     );
@@ -519,8 +598,10 @@
     overlay.hidden = false;
     overlay.classList.toggle('soft', soft);
     overlayKeys = keys;
+    const shownAt = performance.now();
     const card = overlay.querySelector('[data-enter]');
-    if (card) card.addEventListener('click', () => keys && keys('Enter'));
+    // A tap too soon after the card appears is a leftover from play — don't skip the card.
+    if (card) card.addEventListener('click', () => { if (performance.now() - shownAt > 900 && keys) keys('Enter'); });
   }
   function hideOverlay() {
     overlay.hidden = true;
@@ -539,18 +620,22 @@
         <div class="goal">Level ${g.level} · ${MQ.escapeHtml(lv.name)}</div>
         ${zh}
         <div class="example">${MQ.escapeHtml(ex)}</div>
-        <div class="how">
+        <div class="how keys-only">
           <div><span class="keys"><span class="key">←</span> <span class="key">→</span></span>walk under the answer</div>
           <div><span class="keys"><span class="key">↑</span></span>jump up!</div>
         </div>
+        <div class="how touch-only">
+          <div><span class="keys">👆</span>tap the right answer — you jump up!</div>
+        </div>
         ${first ? '<p class="hint">Climb 10 floors to the top of the tower 🏯<br>Wrong ledge? It crumbles — no problem, just try again!</p>' : '<p class="hint">Climb 10 floors to the top 🏯</p>'}
-        <div class="press">Press <span class="key">return</span> to start</div>
+        <div class="press keys-only">Press <span class="key">return</span> to start</div>
+        <button class="btn go touch-only">Start ▶</button>
       </div>`,
       (k) => { if (k === 'Enter' || k === ' ') startPlay(); }
     );
-    if (first) MQ.Voice.say('Welcome to Castle Climb! Walk under the right answer, then jump up!', 'en-US', { interrupt: true });
+    if (first) MQ.Voice.say(touchUI() ? 'Welcome to Castle Climb! Tap the right answer to jump up!' : 'Welcome to Castle Climb! Walk under the right answer, then jump up!', 'en-US', { interrupt: true });
     else MQ.Voice.say(`Level ${g.level}. ${lv.name.replace('·', '.').replace('±', 'plus or minus').replace('&', 'and')}.`, 'en-US', { interrupt: true });
-    say('Press return to start climbing!');
+    say(touchUI() ? 'Tap Start to climb!' : 'Press return to start climbing!');
     updateHud();
   }
 
@@ -559,6 +644,7 @@
     state = 'play';
     MQ.Sound.click();
     announce();
+    tapHintOn = touchUI() && !g.tapHintDone;
   }
 
   function showPause() {
@@ -575,7 +661,7 @@
         <div class="card">
           <h2>⏸ Paused</h2>
           <div class="menu">${items.map((it, i) => `<button class="btn ${i === 0 ? '' : 'secondary'} ${i === sel ? 'sel' : ''}" data-i="${i}">${it[0]}</button>`).join('')}</div>
-          <div class="press">Use <span class="key">↑</span> <span class="key">↓</span> and <span class="key">return</span></div>
+          <div class="press keys-only">Use <span class="key">↑</span> <span class="key">↓</span> and <span class="key">return</span></div>
         </div>`,
         (k) => {
           if (k === 'ArrowUp' || k === 'ArrowDown') { sel = 1 - sel; MQ.Sound.click(); render(); }
@@ -639,7 +725,7 @@
       idleClock += dt;
       if (idleClock > 12 && !nudged) {
         nudged = true;
-        say('Walk ⬅ ➡ under the right answer, then press ⬆ to jump!');
+        say(touchUI() ? 'Tap the right answer to jump up! 👆' : 'Walk ⬅ ➡ under the right answer, then press ⬆ to jump!');
       }
     }
 
@@ -753,14 +839,14 @@
       ctx.fillStyle = '#fff';
       for (const s of skyStars) {
         ctx.globalAlpha = starA * (0.55 + 0.45 * Math.sin(time * 2 + s.tw));
-        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(s.x * W, s.y * H, s.r, 0, Math.PI * 2); ctx.fill();
       }
       ctx.globalAlpha = 1;
     }
 
     // The sun sinks as he climbs; a crescent moon rises on the other side.
     const sunY = 130 + t * 420;
-    const sunX = 805;
+    const sunX = W - 75;
     const sunC = mix('#fff6c9', '#ff8a4c', clamp(t * 1.2, 0, 1));
     const glow = ctx.createRadialGradient(sunX, sunY, 10, sunX, sunY, 140);
     glow.addColorStop(0, 'rgba(255,240,190,0.75)');
@@ -795,7 +881,7 @@
     const t = heightT();
     const tint = mixStops(SKY_MID, t);
     for (const m of MOUNTAINS) {
-      const base = m.base + cam * FH * m.par;
+      const base = m.base + (H - 760) + cam * FH * m.par;
       if (base - m.amp > H + 10) continue;
       ctx.globalAlpha = m.a;
       ctx.fillStyle = m.col;
@@ -821,7 +907,7 @@
     const col = mix('#ffffff', '#ffd6c4', clamp(t * 1.3, 0, 1));
     ctx.fillStyle = col;
     for (const c of clouds) {
-      const y = c.yb + cam * FH * 0.55;
+      const y = c.yb + (H - 760) + cam * FH * 0.55;
       if (y < -80 || y > H + 80) continue;
       ctx.globalAlpha = 0.85;
       ctx.save();
@@ -1034,7 +1120,7 @@
   function drawDeck(f, litA) {
     const y = sy(f);
     if (y < -120 || y > H + 80) return;
-    eave(y + 12, 88, 52, litA > 0, litA);
+    eave(y + 12, eaveExt(88), 52, litA > 0, litA);
     // Railing behind him
     ctx.strokeStyle = '#a8321f';
     ctx.lineWidth = 3;
@@ -1111,7 +1197,7 @@
     ctx.beginPath(); ctx.arc(TCX - 94, top - 10, 8, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.arc(TCX + 94, top - 10, 8, 0, Math.PI * 2); ctx.fill();
     // Big lower eave
-    eave(base, 120, 66, floor >= FLOORS, floor >= FLOORS ? clamp(topT, 0, 1) : 0);
+    eave(base, eaveExt(120), 66, floor >= FLOORS, floor >= FLOORS ? clamp(topT, 0, 1) : 0);
     // Golden finial
     const fy = top - 10;
     const gold = ctx.createLinearGradient(TCX - 14, 0, TCX + 14, 0);
@@ -1145,12 +1231,13 @@
   }
 
   // A stone ledge with the answer carved big on its face.
-  function drawLedge(i, L, y, alpha, highlight) {
+  function drawLedge(i, L, y, alpha, highlight, pressed) {
     if (!L.alive) return;
     const w = ledgeW();
     let x = laneX(i);
     if (L.crack > 0) x += Math.sin(time * 55) * 3.5 * L.crack;
-    const bob = highlight ? Math.sin(time * 4) * 2 - 2 : 0;
+    const bob = pressed ? 4 : highlight ? Math.sin(time * 4) * 2 - 2 : 0;
+    if (pressed) highlight = true;
     const y0 = y + bob;
     const x0 = x - w / 2;
     ctx.save();
@@ -1243,8 +1330,9 @@
       problem.ledges.forEach((L, i) => drawLedge(i, L, y, i === problem.chosen ? 1 - b : Math.max(0, 1 - b * 2), false));
       return;
     }
-    const aim = state === 'play' && heroP.t >= 1 ? heroP.lane : -1;
-    problem.ledges.forEach((L, i) => drawLedge(i, L, y, 1, i === aim));
+    const pressed = state === 'play' && pressOnLedge ? pressLane : -1;
+    const aim = pressed >= 0 ? -1 : state === 'play' && heroP.t >= 1 ? heroP.lane : -1;
+    problem.ledges.forEach((L, i) => drawLedge(i, L, y, 1, i === aim, i === pressed));
   }
 
   function drawTower() {
@@ -1429,11 +1517,22 @@
     const zhOn = data.settings.chinese;
     const title = top ? 'You reached the top!' : problem.text;
     const sub = top ? '你到顶了！' : problem.zh;
-    ctx.font = `900 ${top ? 40 : 54}px ${UI_FONT}`;
-    const tw = ctx.measureText(title).width;
-    const bw = Math.max(330, tw + 110);
+    const ring = !top && problem.firstAttempt && !problem.done;
+    // Fit the banner (and the ✨ ring beside it) on narrow phone screens.
+    let fs = top ? 40 : 54;
+    ctx.font = `900 ${fs}px ${UI_FONT}`;
+    let tw = ctx.measureText(title).width;
+    const pad = W < 700 ? 60 : 110;
+    const room = W - 20 - (ring ? 70 : 0);
+    while (fs > 28 && tw + pad > room) {
+      fs -= 2;
+      ctx.font = `900 ${fs}px ${UI_FONT}`;
+      tw = ctx.measureText(title).width;
+    }
+    const bw = Math.min(Math.max(W < 700 ? 240 : 330, tw + pad), room);
     const bh = zhOn ? 112 : 84;
-    const bx = W / 2 - bw / 2;
+    const bx = W < 700 ? (W - bw - (ring ? 70 : 0)) / 2 : W / 2 - bw / 2;
+    const bcx = bx + bw / 2;
     const by = 14;
     // Cords
     ctx.strokeStyle = '#6b3b1f';
@@ -1463,17 +1562,17 @@
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = '#fff';
-    ctx.font = `900 ${top ? 40 : 54}px ${UI_FONT}`;
-    ctx.fillText(title, W / 2, by + (zhOn ? 44 : bh / 2 + 2));
+    ctx.font = `900 ${fs}px ${UI_FONT}`;
+    ctx.fillText(title, bcx, by + (zhOn ? 44 : bh / 2 + 2));
     if (zhOn) {
       ctx.fillStyle = '#ffe7a8';
       ctx.font = `700 24px "PingFang SC","Hiragino Sans GB","Noto Sans SC",${UI_FONT}`;
-      ctx.fillText(sub, W / 2, by + 88);
+      ctx.fillText(sub, bcx, by + 88);
     }
 
     // ✨ Speedy bonus ring: a calm, optional bonus — it just fades out, nothing bad happens.
-    if (!top && problem.firstAttempt && !problem.done) {
-      const cx = bx + bw + 40;
+    if (ring) {
+      const cx = bx + bw + (W < 700 ? 38 : 40);
       const cy = by + bh / 2;
       const left = clamp(1 - problemClock / lv.pace, 0, 1);
       ctx.globalAlpha = left > 0 ? 1 : 0.35;
@@ -1496,13 +1595,22 @@
   function drawHintScroll() {
     if (!hintOn || !problem || problem.done || state === 'top' || state === 'result') return;
     const text = problem.firstAttempt ? `💡 ${problem.tip}` : problem.full;
-    ctx.font = `800 23px ${UI_FONT}`;
-    const lines = wrapText(text, 600);
-    const lh = 30;
-    const w = Math.min(660, Math.max(...lines.map((l) => ctx.measureText(l).width)) + 60);
+    const y = (data.settings.chinese ? 112 : 84) + 30;
+    const maxW = Math.min(600, W - 80);
+    const limit = state === 'play' || state === 'jump' ? sy(floor + 1) - 12 : H; // keep the ledges uncovered
+    let fs = 23;
+    let lines;
+    let lh;
+    for (;;) {
+      ctx.font = `800 ${fs}px ${UI_FONT}`;
+      lines = wrapText(text, maxW);
+      lh = Math.round(fs * 1.3);
+      if (fs <= 17 || y + lines.length * lh + 28 <= limit) break;
+      fs -= 1;
+    }
+    const w = Math.min(Math.min(660, W - 36), Math.max(...lines.map((l) => ctx.measureText(l).width)) + 60);
     const h = lines.length * lh + 28;
     const x = W / 2 - w / 2;
-    const y = (data.settings.chinese ? 112 : 84) + 30;
     ctx.save();
     ctx.shadowColor = 'rgba(60,30,0,0.3)';
     ctx.shadowBlur = 12;
@@ -1525,6 +1633,41 @@
     lines.forEach((l, i) => ctx.fillText(l, W / 2, y + 14 + lh / 2 + i * lh));
   }
 
+  // One-time 👆 for the first touch climb: a hand sweeps across the ledges (it never points
+  // at the answer) until he taps one.
+  function drawTapHint() {
+    if (!tapHintOn || state !== 'play' || !problem || problem.done) return;
+    const ly = sy(floor + 1);
+    const u = (Math.sin(time * 1.7) + 1) / 2;
+    const x = lerp(laneX(0), laneX(lanes - 1), u);
+    const y = ly + LEDGE_H + 40 + Math.sin(time * 7) * 5;
+    ctx.save();
+    ctx.font = `52px ${EMOJI_FONT}`;
+    ctx.fillStyle = '#000';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('👆', x, y);
+    ctx.restore();
+    if (hintOn) return; // the hint scroll sits where the label would go
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const label = 'Tap the right answer!';
+    ctx.font = `900 24px ${UI_FONT}`;
+    const tw = ctx.measureText(label).width + 30;
+    const lx = clamp(TCX, tw / 2 + 8, W - tw / 2 - 8);
+    const ty = ly - 30;
+    roundRect(lx - tw / 2, ty - 20, tw, 40, 20);
+    ctx.fillStyle = 'rgba(255,255,255,0.94)';
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#f5b700';
+    ctx.stroke();
+    ctx.fillStyle = '#7a3b1a';
+    ctx.fillText(label, lx, ty + 1);
+    ctx.restore();
+  }
+
   function draw() {
     ctx.clearRect(0, 0, W, H);
     drawSky();
@@ -1535,28 +1678,65 @@
     drawHero();
     drawEffects();
     drawRockets();
+    drawTapHint();
     drawHintScroll();
     drawBanner();
   }
 
   // ---------- Sizing (crisp on Retina screens) ----------
   let pixelScale = 1;
-  function resize() {
-    const narrow = window.innerWidth <= 860;
-    const availW = narrow ? window.innerWidth - 24 : window.innerWidth - 300 - 20 - 36;
-    const availH = narrow ? window.innerHeight * 0.7 : window.innerHeight - 24;
-    const scale = Math.max(0.4, Math.min(availW / W, availH / H, 1.5));
-    const dpr = window.devicePixelRatio || 1;
-    stage.style.width = `${Math.round(W * scale)}px`;
-    stage.style.height = `${Math.round(H * scale)}px`;
-    canvas.style.width = `${Math.round(W * scale)}px`;
-    canvas.style.height = `${Math.round(H * scale)}px`;
-    canvas.width = Math.round(W * scale * dpr);
-    canvas.height = Math.round(H * scale * dpr);
-    pixelScale = scale * dpr;
-    ctx.setTransform(pixelScale, 0, 0, pixelScale, 0, 0);
+  function pickLayout() {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    if (vw <= 860 && vh > vw) return 'portrait';
+    if (vh <= 560 && vw > vh) return 'landscape';
+    return 'wide';
   }
-  window.addEventListener('resize', resize);
+  function resize() {
+    layout = pickLayout();
+    const root = document.documentElement;
+    ['wide', 'portrait', 'landscape'].forEach((m) => root.classList.toggle(`lay-${m}`, layout === m));
+    const dpr = window.devicePixelRatio || 1;
+    let cssW;
+    let cssH;
+    let scale;
+    if (layout === 'wide') {
+      setGeometry(880, 760);
+      const narrow = window.innerWidth <= 860;
+      const availW = narrow ? window.innerWidth - 24 : window.innerWidth - 300 - 20 - 36;
+      const availH = narrow ? window.innerHeight * 0.7 : window.innerHeight - 24;
+      scale = Math.max(0.4, Math.min(availW / W, availH / H, 1.5));
+      cssW = Math.round(W * scale);
+      cssH = Math.round(H * scale);
+      stage.style.width = `${cssW}px`;
+      stage.style.height = `${cssH}px`;
+    } else {
+      // Phones: CSS gives the stage all the room left by the HUD; the board fills it exactly.
+      stage.style.width = '';
+      stage.style.height = '';
+      const r = stage.getBoundingClientRect();
+      cssW = Math.max(200, Math.floor(r.width));
+      cssH = Math.max(200, Math.floor(r.height));
+      scale = Math.min(cssW / 440, cssH / 560);
+      setGeometry(cssW / scale, cssH / scale);
+    }
+    canvas.style.width = `${cssW}px`;
+    canvas.style.height = `${cssH}px`;
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    pixelScale = (cssW / W) * dpr;
+    ctx.setTransform(pixelScale, 0, 0, pixelScale, 0, 0);
+    if (floor >= FLOORS && camTo > FLOORS) { camTo = FLOORS + (layout === 'wide' ? 0.45 : (H - 8 - HERO_Y) / FH); if (state !== 'climb') cam = camTo; }
+  }
+  let resizeQueued = false;
+  function queueResize() {
+    if (resizeQueued) return;
+    resizeQueued = true;
+    requestAnimationFrame(() => { resizeQueued = false; resize(); });
+  }
+  window.addEventListener('resize', queueResize);
+  window.addEventListener('orientationchange', () => { queueResize(); setTimeout(resize, 300); });
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', queueResize);
 
   let last = performance.now();
   function frame(now) {
@@ -1564,6 +1744,7 @@
     last = now;
     update(dt);
     draw();
+    syncBar();
     requestAnimationFrame(frame);
   }
 
@@ -1578,6 +1759,9 @@
     get level() { return g.level; },
     get floor() { return floor; },
     get hero() { return heroP.lane; },
+    get layout() { return layout; },
+    get tapHint() { return tapHintOn; },
+    geometry: () => ({ W, H, TX0, TX1, HERO_Y, ledgeW: ledgeW(), ledgeY: sy(floor + 1), ledgeH: LEDGE_H, laneX: Array.from({ length: lanes }, (_, i) => laneX(i)) }),
     get problem() {
       if (!problem) return null;
       return {

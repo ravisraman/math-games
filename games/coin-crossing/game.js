@@ -3,18 +3,48 @@
 (function () {
   'use strict';
 
-  // Wide board sized for a 13" laptop screen. Row 0 is the (tall) castle, the last row is the start.
-  const COLS = 13;
-  const ROWS = 10;
+  // Row 0 is the (tall) castle, the last row is the start. The grid shape is picked from the
+  // screen when a level starts: the wide 13-column board on a laptop, a narrow 7-column board
+  // on a portrait phone (so coins stay big), and a shorter 13-column board on a landscape phone.
+  // Everything is drawn in board units (CELL = 64) and scaled to fit the screen.
   const CELL = 64;
-  const CASTLE_H = 160;
-  const W = COLS * CELL;
-  const H = CASTLE_H + (ROWS - 1) * CELL;
+  const GRIDS = {
+    desk: { cols: 13, rows: 10, castle: 160 },
+    port: { cols: 7, rows: 10, castle: 120 },
+    land: { cols: 13, rows: 8, castle: 112 },
+  };
+  let COLS, ROWS, CASTLE_H, W, H, START_ROW, START_COL, gridKey;
   const BANK_ROW = 0;
-  const START_ROW = ROWS - 1;
-  const START_COL = Math.floor(COLS / 2);
+  function setGrid(key) {
+    const gr = GRIDS[key];
+    gridKey = key;
+    COLS = gr.cols;
+    ROWS = gr.rows;
+    CASTLE_H = gr.castle;
+    W = COLS * CELL;
+    H = CASTLE_H + (ROWS - 1) * CELL;
+    START_ROW = ROWS - 1;
+    START_COL = Math.floor(COLS / 2);
+  }
   const rowTop = (r) => (r === BANK_ROW ? 0 : CASTLE_H + (r - 1) * CELL);
-  const rowMid = (r) => (r === BANK_ROW ? CASTLE_H - 34 : rowTop(r) + CELL / 2);
+  const rowMid = (r) => (r === BANK_ROW ? CASTLE_H - Math.round(34 * CASTLE_H / 160) : rowTop(r) + CELL / 2);
+
+  // Screen layout: 'desk' (laptop, unchanged), 'port' (portrait phone), 'land' (landscape phone).
+  function layoutFor() {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    if (vw <= 700 && vh >= vw) return 'port';
+    if (vh <= 520 && vw > vh) return 'land';
+    return 'desk';
+  }
+  let layout = layoutFor();
+  function applyLayoutClass() {
+    const root = document.documentElement;
+    root.classList.remove('lay-desk', 'lay-port', 'lay-land');
+    root.classList.add(`lay-${layout}`);
+  }
+  applyLayoutClass();
+  setGrid(layout);
   const HOP_TIME = 0.13;
   const GAME_ID = 'coinCrossing';
   const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
@@ -143,12 +173,23 @@
       targetFmt = pouchFmt = cfg.format;
     }
 
+    pouch = [];
+    stats = { overshoots: 0, bonks: 0, putBacks: 0, seconds: 0 };
+    needRevealed = cfg.showNeed;
+    buildBoard();
+  }
+
+  // Roads, cars, coins and the hero for the current target, on a grid that fits this screen.
+  function buildBoard() {
+    setGrid(layout);
+    const roads = Math.min(cfg.roads, ROWS - 4);
+
     // Lanes: row 0 is the castle, the bottom row is the safe start, some middle rows are roads.
     // Roads come in short groups with safe grass rows between them.
     let roadRows;
     for (let attempt = 0; attempt < 200; attempt++) {
       const middle = shuffle(Array.from({ length: ROWS - 2 }, (_, i) => i + 1));
-      roadRows = new Set(middle.slice(0, cfg.roads));
+      roadRows = new Set(middle.slice(0, roads));
       let run = 0;
       let ok = true;
       for (let r = 1; r <= ROWS - 2; r++) {
@@ -178,21 +219,25 @@
     player = { r: START_ROW, c: START_COL, fromR: START_ROW, fromC: START_COL, t: 1, inv: 0, land: 0 };
     bgSeed = Math.floor(Math.random() * 1e9);
     bgCanvas = null;
-    pouch = [];
-    stats = { overshoots: 0, bonks: 0, putBacks: 0, seconds: 0 };
-    needRevealed = cfg.showNeed;
+    initAmbient();
     gateLift = 0;
     particles = [];
     floaters = [];
     queuedMove = null;
+    ripples = [];
     updateHud();
+    resize();
   }
 
   function makeLane(row) {
     const dir = Math.random() < 0.5 ? 1 : -1;
-    const speed = cfg.speed * (0.75 + Math.random() * 0.5);
-    const n = rand(1, cfg.maxCars);
+    // A short (narrow-board) lane gets fewer cars and a little less speed, since cars
+    // come into view closer to the hero. The 13-column board is unchanged.
     const span = COLS + 4;
+    const narrow = COLS < 13;
+    const speed = cfg.speed * (narrow ? 0.9 : 1) * (0.75 + Math.random() * 0.5);
+    const maxCars = narrow ? Math.max(1, Math.round(cfg.maxCars * span / 17)) : cfg.maxCars;
+    const n = rand(1, maxCars);
     const gap = span / n;
     const cars = [];
     for (let i = 0; i < n; i++) {
@@ -223,16 +268,33 @@
     if (t === target) need.textContent = '✅ Exactly right! Hop to the castle ⬆';
     else if (needRevealed) need.textContent = `Need ${MQ.money(target - t, targetFmt)} more`;
     else need.textContent = 'How much more do you need? 🤔';
+    // Compact copy for the phone HUD (next to the target).
+    const need2 = el('need2');
+    need2.classList.toggle('done', t === target);
+    if (t === target) need2.textContent = '✅ Exactly! Hop up ⬆';
+    else if (needRevealed) need2.textContent = `Need ${MQ.money(target - t, targetFmt)} more`;
+    else need2.textContent = 'How much more? 🤔';
+    el('btn-back').classList.toggle('empty', pouch.length === 0);
   }
 
+  // Phones show the panda's message as a toast over the board that fades after a moment.
+  let toastTimer = 0;
+  let toastLow = false;
   function say(text, { speak = false } = {}) {
     el('message').textContent = text;
     const b = el('bubble');
     b.classList.remove('pop');
     void b.offsetWidth;
-    b.classList.add('pop');
+    b.classList.add('pop', 'show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => b.classList.remove('show'), 2600 + text.length * 45);
     if (speak) MQ.Voice.say(text.replace(/\p{Extended_Pictographic}/gu, ''), 'en-US', { interrupt: true });
   }
+
+  // Touch wording vs keyboard wording.
+  let usedTouch = MQ.isTouch;
+  const touchUI = () => usedTouch || layout !== 'desk';
+  const PUT_BACK = () => (touchUI() ? 'Tap ↩ Put back' : 'Press SPACE');
 
   // ---------- Input ----------
   const DIRS = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
@@ -256,7 +318,101 @@
     data.settings.music = data.settings.music === false;
     MQ.applySettings(data.settings);
     persist();
+    syncMusicBtn();
     say(data.settings.music ? '🎵 Music on' : '🔇 Music off');
+  }
+  function syncMusicBtn() {
+    const b = el('btn-music');
+    const on = data.settings.music !== false;
+    b.textContent = on ? '🎵' : '🔇';
+    b.classList.toggle('off', !on);
+  }
+
+  // ---------- Touch: tap = hop up, tap a neighbor cell = hop there, swipe = hop that way ----------
+  const wrap = el('stage-wrap');
+  let touch = null; // the one finger we are following
+  let ripples = [];
+  const SWIPE = 26; // CSS px before a drag counts as a swipe
+
+  function boardPoint(e) {
+    const rect = canvas.getBoundingClientRect();
+    const k = W / rect.width;
+    return { x: (e.clientX - rect.left) * k, y: (e.clientY - rect.top) * k, inside: e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom };
+  }
+  function cellAt(x, y) {
+    const r = y < CASTLE_H ? BANK_ROW : 1 + Math.floor((y - CASTLE_H) / CELL);
+    return { r: Math.max(0, Math.min(START_ROW, r)), c: Math.max(0, Math.min(COLS - 1, Math.floor(x / CELL))) };
+  }
+  function boardInput(e) {
+    if (e.target.closest && e.target.closest('.overlay, .touch-hint')) return false;
+    if (e.pointerType === 'mouse' && layout === 'desk') return false; // laptop: keyboard, as before
+    return true;
+  }
+
+  wrap.addEventListener('pointerdown', (e) => {
+    if (!boardInput(e)) return;
+    if (e.pointerType !== 'mouse') usedTouch = true;
+    if (touch || state !== 'play') return;
+    e.preventDefault();
+    MQ.Sound.ensure();
+    touch = { id: e.pointerId, x: e.clientX, y: e.clientY, done: false };
+    try { wrap.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+  });
+  wrap.addEventListener('pointermove', (e) => {
+    if (!touch || e.pointerId !== touch.id || touch.done || state !== 'play') return;
+    const dx = e.clientX - touch.x;
+    const dy = e.clientY - touch.y;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE) return;
+    touch.done = true; // one hop per swipe
+    if (Math.abs(dx) > Math.abs(dy)) touchMove(0, dx > 0 ? 1 : -1);
+    else touchMove(dy > 0 ? 1 : -1, 0);
+  });
+  const endTouch = (e) => {
+    if (!touch || e.pointerId !== touch.id) return;
+    const t = touch;
+    touch = null;
+    if (t.done || state !== 'play' || e.type === 'pointercancel') return;
+    const p = boardPoint(e);
+    ripples.push({ x: p.x, y: p.y, life: 1 });
+    // Tapped right next to the hero? Hop there. Anywhere else: hop forward.
+    const cell = cellAt(p.x, p.y);
+    const dr = cell.r - player.r;
+    const dc = cell.c - player.c;
+    if (p.inside && Math.abs(dr) + Math.abs(dc) === 1 && !(cell.r === BANK_ROW && dr !== -1)) touchMove(dr, dc);
+    else touchMove(-1, 0);
+  };
+  wrap.addEventListener('pointerup', endTouch);
+  wrap.addEventListener('pointercancel', endTouch);
+  function touchMove(dr, dc) {
+    hideTouchHint();
+    tryMove(dr, dc);
+  }
+
+  // Big on-screen buttons (phones and tablets).
+  function onTap(id, fn) {
+    const b = el(id);
+    b.addEventListener('click', (e) => { e.preventDefault(); MQ.Sound.ensure(); fn(); b.blur(); });
+  }
+  onTap('btn-back', () => { if (state === 'play') putBack(); });
+  onTap('btn-pause', () => {
+    if (state === 'play') showPause();
+    else if (state === 'pause') { hideOverlay(); state = 'play'; }
+  });
+  onTap('btn-music', toggleMusic);
+
+  // One-time animated "tap to hop, swipe to turn" hint.
+  let hintTimer = 0;
+  function maybeShowTouchHint() {
+    if (!touchUI() || g.touchHintSeen) return;
+    g.touchHintSeen = true;
+    persist();
+    el('touch-hint').hidden = false;
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(hideTouchHint, 7000);
+  }
+  function hideTouchHint() {
+    const h = el('touch-hint');
+    if (!h.hidden) h.hidden = true;
   }
 
   function tryMove(dr, dc) {
@@ -321,7 +477,7 @@
     } else {
       const left = coins.filter((c) => !c.taken).map((c) => c.v);
       if (!canMake(target - now, left)) {
-        say(`Hmm… the coins left can't make exactly ${MQ.money(target, targetFmt)}. Press SPACE to put a coin back.`);
+        say(`Hmm… the coins left can't make exactly ${MQ.money(target, targetFmt)}. ${PUT_BACK()} to put a coin back.`);
       } else {
         say(`You picked up a ${name}. Now you have ${MQ.money(now, pouchFmt)}.`);
       }
@@ -425,10 +581,12 @@
         </div>
         <div class="next">${move.text}</div>
         ${newHero ? `<div class="next">🎉 New hero unlocked: ${newHero.emoji} ${newHero.name}! Pick it in the portal.</div>` : ''}
-        <div class="press">Press <span class="key">return</span> for a bonus question ⭐</div>
+        <div class="press keys-only">Press <span class="key">return</span> for a bonus question ⭐</div>
+        <button class="btn go touch-only" data-go>Bonus question ⭐ ▶</button>
       </div>`,
       (k) => { if (k === 'Enter' || k === ' ') startQuiz(); }
     );
+    onGo(startQuiz);
   }
 
   // ---------- Bonus questions between levels ----------
@@ -584,13 +742,15 @@
           <div class="quiz-q">${MQ.escapeHtml(q.q)}</div>
           <div class="choices">${choices}</div>
           ${feedback}
-          <div class="press">${result ? 'Press <span class="key">return</span> to keep going' : 'Pick with <span class="key">←</span> <span class="key">→</span> then press <span class="key">return</span>'}</div>
+          <div class="press keys-only">${result ? 'Press <span class="key">return</span> to keep going' : 'Pick with <span class="key">←</span> <span class="key">→</span> then press <span class="key">return</span>'}</div>
+          ${result ? '<button class="btn go touch-only" data-go>Next level ▶</button>' : '<div class="press touch-only">Tap your answer 👆</div>'}
         </div>`, keys);
       overlay.querySelectorAll('.choice').forEach((b) => b.addEventListener('click', () => {
-        if (done) { nextLevel(); return; }
+        if (done) { if (!MQ.isTouch) nextLevel(); return; } // on touch, the Next button moves on (no accidental double tap)
         sel = Number(b.dataset.i);
         answer();
       }));
+      if (result) onGo(nextLevel);
     };
 
     const answer = () => {
@@ -633,6 +793,18 @@
     overlay.innerHTML = '';
     overlayKeys = null;
   }
+  // The big Start / Next button on a card (touch). Only the first tap counts.
+  function onGo(fn) {
+    const b = overlay.querySelector('[data-go]');
+    if (!b) return;
+    b.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (b.disabled) return;
+      b.disabled = true;
+      MQ.Sound.click();
+      fn();
+    });
+  }
 
   function showIntro() {
     state = 'intro';
@@ -650,22 +822,27 @@
         ${zh}
         ${convert}
         <div class="legend">${legend}</div>
-        ${first ? `<p class="hint">Hop with the arrow keys. Stay away from the cars! 🚗<br>Grabbed the wrong coin? Press <span class="key">space</span> to put it back.<br>When you have the exact amount, hop into the castle 🏰 at the top.</p>` : ''}
-        <div class="press">Press <span class="key">return</span> to start</div>
+        ${first ? `<p class="hint keys-only">Hop with the arrow keys. Stay away from the cars! 🚗<br>Grabbed the wrong coin? Press <span class="key">space</span> to put it back.<br>When you have the exact amount, hop into the castle 🏰 at the top.</p>
+        <p class="hint touch-only">Tap to hop, swipe to turn. Stay away from the cars! 🚗<br>Wrong coin? Tap <b>↩ Put back</b>.<br>Exact amount? Hop into the castle 🏰!</p>` : ''}
+        <div class="press keys-only">Press <span class="key">return</span> to start</div>
+        <button class="btn go touch-only" data-go>Start ▶</button>
       </div>`,
       (k) => { if (k === 'Enter' || k === ' ') startPlay(); }
     );
+    onGo(startPlay);
     MQ.Voice.say(`Level ${g.level}. Collect exactly ${MQ.moneyWords(target)}.`, 'en-US', { interrupt: true });
-    if (first) MQ.Voice.say('Hop with the arrow keys. Watch out for the cars! When you have exactly the right money, hop into the castle.', 'en-US');
+    if (first) MQ.Voice.say(touchUI() ? 'Tap to hop. Watch out for the cars! When you have exactly the right money, hop into the castle.' : 'Hop with the arrow keys. Watch out for the cars! When you have exactly the right money, hop into the castle.', 'en-US');
     if (data.settings.chinese) MQ.Voice.say(MQ.zhMoney(target), 'zh-CN');
     say(`Collect exactly ${MQ.money(target, targetFmt)}!`);
   }
 
   function startPlay() {
+    if (state !== 'intro') return;
     hideOverlay();
     state = 'play';
     MQ.Sound.click();
     say(`Collect exactly ${MQ.money(target, targetFmt)}, then hop into the castle!`);
+    maybeShowTouchHint();
   }
 
   function showPause() {
@@ -677,7 +854,7 @@
         <div class="card">
           <h2>⏸ Paused</h2>
           <div class="menu">${items.map((it, i) => `<button class="btn ${i === 0 ? '' : 'secondary'} ${i === sel ? 'sel' : ''}" data-i="${i}">${it[0]}</button>`).join('')}</div>
-          <div class="press">Use <span class="key">↑</span> <span class="key">↓</span> and <span class="key">return</span></div>
+          <div class="press keys-only">Use <span class="key">↑</span> <span class="key">↓</span> and <span class="key">return</span></div>
         </div>`,
         (k) => {
           if (k === 'ArrowUp' || k === 'ArrowDown') { sel = 1 - sel; render(); }
@@ -726,6 +903,8 @@
     }
 
     if (state === 'play') {
+      const low = player.r < ROWS / 2;
+      if (low !== toastLow) { toastLow = low; el('bubble').classList.toggle('low', low); }
       if (player.t < 1) {
         player.t = Math.min(1, player.t + dt / HOP_TIME);
         if (player.t === 1) onLand();
@@ -862,7 +1041,7 @@
           b.font = `20px ${EMOJI_FONT}`;
           b.fillStyle = '#000';
           b.textAlign = 'center'; b.textBaseline = 'middle';
-          for (const c of [0, 2, 4, 8, 10, 12]) b.fillText(c % 4 === 0 ? '🌷' : '🌼', c * CELL + 32, y + 34);
+          for (let c = 0; c < COLS; c += 2) if (Math.abs(c - START_COL) >= 2) b.fillText(c % 4 === 0 ? '🌷' : '🌼', c * CELL + 32, y + 34);
         }
       }
     }
@@ -874,8 +1053,14 @@
   }
 
   // Slow cloud shadows and a couple of butterflies keep the scene gently alive.
-  const clouds = [0, 1, 2].map((i) => ({ x: i * 320 + Math.random() * 100, y: 220 + i * 170, s: 0.8 + Math.random() * 0.6 }));
-  const butterflies = [0, 1].map((i) => ({ x: Math.random() * W, y: 240 + Math.random() * 300, phase: Math.random() * 6, dir: i ? 1 : -1 }));
+  // Spread over the board, whatever its shape (736 = the laptop board's height).
+  let clouds = [];
+  let butterflies = [];
+  function initAmbient() {
+    const k = H / 736;
+    clouds = [0, 1, 2].map((i) => ({ x: i * (W / 2.6) + Math.random() * 100, y: (220 + i * 170) * k, s: (0.8 + Math.random() * 0.6) * Math.min(1, W / 832 + 0.2) }));
+    butterflies = [0, 1].map((i) => ({ x: Math.random() * W, y: (240 + Math.random() * 300) * k, phase: Math.random() * 6, dir: i ? 1 : -1 }));
+  }
 
   function drawAmbient(dt) {
     for (const cl of clouds) {
@@ -924,23 +1109,42 @@
     for (let mx = x; mx < x + w - 4; mx += 28) ctx.fillRect(mx, y, 16, 14);
   }
 
-  function sign(cx, cy, title, big, color) {
-    roundRect(cx - 88, cy - 30, 176, 60, 10);
+  // A wooden sign; the text shrinks to fit narrow signs. (w 176 × h 60 is the laptop size.)
+  function sign(cx, cy, title, big, color, w = 176, h = 60) {
+    roundRect(cx - w / 2, cy - h / 2, w, h, 10);
     ctx.fillStyle = '#fff4d6'; ctx.fill();
     ctx.lineWidth = 4; ctx.strokeStyle = '#8a5a2b'; ctx.stroke();
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const fit = (text, weight, px) => {
+      ctx.font = `${weight} ${px}px ${UI_FONT}`;
+      const tw = ctx.measureText(text).width;
+      if (tw > w - 14) ctx.font = `${weight} ${Math.floor(px * (w - 14) / tw)}px ${UI_FONT}`;
+    };
     ctx.fillStyle = '#8a5a2b';
-    ctx.font = `800 13px ${UI_FONT}`;
-    ctx.fillText(title, cx, cy - 15);
+    fit(title, 800, Math.round(h * 13 / 60));
+    ctx.fillText(title, cx, cy - h / 4);
     ctx.fillStyle = color;
-    ctx.font = `900 26px ${UI_FONT}`;
-    ctx.fillText(big, cx, cy + 9);
+    fit(big, 900, Math.round(h * 26 / 60));
+    ctx.fillText(big, cx, cy + h * 0.15);
   }
 
+  // The castle is designed 160 units tall. On shorter castle bands it is drawn scaled down
+  // (s < 1) across a correspondingly wider design width CW; narrow boards get slimmer parts.
   function drawCastle() {
+    const s = CASTLE_H / 160;
+    ctx.save();
+    ctx.scale(s, s);
+    drawCastleParts(W / s, 160);
+    ctx.restore();
+  }
+
+  function drawCastleParts(W, CASTLE_H) {
     const open = total() === target;
     const brick = '#c96a4a';
     const mortar = 'rgba(90,30,20,0.35)';
+    const slim = W < 800;
+    const towerW = slim ? 84 : 100;
+    const towerX = slim ? 48 : 70;
 
     // Sky behind the castle
     const sky = ctx.createLinearGradient(0, 0, 0, CASTLE_H);
@@ -953,16 +1157,16 @@
     merlons(0, 48, W, brick);
 
     // Corner towers with pointy roofs and flags
-    for (const tx of [70, W - 70]) {
-      bricks(tx - 50, 40, 100, CASTLE_H - 40, '#b85c3e', mortar);
+    for (const tx of [towerX, W - towerX]) {
+      bricks(tx - towerW / 2, 40, towerW, CASTLE_H - 40, '#b85c3e', mortar);
       ctx.fillStyle = '#e0473c';
-      ctx.beginPath(); ctx.moveTo(tx - 58, 42); ctx.lineTo(tx + 58, 42); ctx.lineTo(tx, -6); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(tx - towerW / 2 - 8, 42); ctx.lineTo(tx + towerW / 2 + 8, 42); ctx.lineTo(tx, -6); ctx.closePath(); ctx.fill();
       ctx.fillStyle = '#3b2a25';
       roundRect(tx - 12, 70, 24, 34, 12); ctx.fill();
     }
 
     // Central keep
-    const kw = 300;
+    const kw = slim ? 230 : 300;
     const kx = W / 2 - kw / 2;
     bricks(kx, 22, kw, CASTLE_H - 22, '#d7795a', mortar);
     merlons(kx, 8, kw, '#d7795a');
@@ -974,7 +1178,7 @@
     }
 
     // Gate: an arch with a portcullis that rises when the amount is exactly right.
-    const gw = 140;
+    const gw = slim ? 124 : 140;
     const gx = W / 2 - gw / 2;
     const gTop = 44;
     const archR = gw / 2;
@@ -1026,9 +1230,20 @@
       ctx.globalAlpha = 1;
     }
 
-    // Signs on either side of the gate
-    sign(230, 104, 'CASTLE NEEDS', MQ.money(target, targetFmt), '#b3471a');
-    sign(W - 230, 104, 'THE GATE IS', open ? 'OPEN! ⬆' : 'LOCKED', open ? '#2e9e5b' : '#6b6475');
+    // Signs on either side of the gate (smaller ones between the towers and keep on a narrow board)
+    if (slim) {
+      const sw = Math.min(150, W / 2 - kw / 2 - (towerX + towerW / 2) - 10);
+      const scx = (towerX + towerW / 2 + W / 2 - kw / 2) / 2;
+      sign(scx, 108, 'NEEDS', MQ.money(target, targetFmt), '#b3471a', sw, 64);
+      sign(W - scx, 108, 'GATE', open ? 'OPEN ⬆' : 'LOCKED', open ? '#2e9e5b' : '#6b6475', sw, 64);
+    } else if (W > 1000) {
+      // Landscape phone: a very wide, short castle, so the signs can be bigger.
+      sign(250, 100, 'CASTLE NEEDS', MQ.money(target, targetFmt), '#b3471a', 240, 84);
+      sign(W - 250, 100, 'THE GATE IS', open ? 'OPEN! ⬆' : 'LOCKED', open ? '#2e9e5b' : '#6b6475', 240, 84);
+    } else {
+      sign(230, 104, 'CASTLE NEEDS', MQ.money(target, targetFmt), '#b3471a');
+      sign(W - 230, 104, 'THE GATE IS', open ? 'OPEN! ⬆' : 'LOCKED', open ? '#2e9e5b' : '#6b6475');
+    }
 
     // Golden doorstep glows along the whole wall when open (any column can enter).
     if (open) {
@@ -1238,15 +1453,39 @@
     drawPlayer();
     drawAmbient(dt);
     drawEffects();
+    drawRipples(dt);
+  }
+
+  // A soft ring where a finger tapped, so every tap visibly "did something".
+  function drawRipples(dt) {
+    for (const rp of ripples) {
+      rp.life -= dt * 2.5;
+      if (rp.life <= 0) continue;
+      ctx.globalAlpha = rp.life * 0.8;
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.arc(rp.x, rp.y, 14 + (1 - rp.life) * 26, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ripples = ripples.filter((rp) => rp.life > 0);
   }
 
   // ---------- Sizing (crisp on Retina screens) ----------
   let pixelScale = 1;
   function resize() {
-    const narrow = window.innerWidth <= 860;
-    const availW = narrow ? window.innerWidth - 24 : window.innerWidth - 300 - 20 - 36;
-    const availH = narrow ? window.innerHeight * 0.7 : window.innerHeight - 24;
-    const scale = Math.max(0.4, Math.min(availW / W, availH / H, 1.5));
+    let availW, availH, minScale = 0.4;
+    if (layout === 'desk') {
+      const narrow = window.innerWidth <= 860;
+      availW = narrow ? window.innerWidth - 24 : window.innerWidth - 300 - 20 - 36;
+      availH = narrow ? window.innerHeight * 0.7 : window.innerHeight - 24;
+    } else {
+      // Phones: the board fills whatever the grid gives the stage area.
+      availW = wrap.clientWidth;
+      availH = wrap.clientHeight;
+      minScale = 0.2;
+    }
+    const scale = Math.max(minScale, Math.min(availW / W, availH / H, 1.5));
+    document.documentElement.style.setProperty('--board-w', `${Math.round(W * scale)}px`);
     const dpr = window.devicePixelRatio || 1;
     stage.style.width = `${Math.round(W * scale)}px`;
     stage.style.height = `${Math.round(H * scale)}px`;
@@ -1258,7 +1497,28 @@
     ctx.setTransform(pixelScale, 0, 0, pixelScale, 0, 0);
     bgCanvas = null; // repaint the ground at the new size
   }
-  window.addEventListener('resize', resize);
+
+  // Rotating the phone switches layout. Before play starts the board is rebuilt to the new
+  // shape (same target); mid-level the board is kept and just rescaled, so nothing jumps.
+  let relayoutQueued = false;
+  function relayout() {
+    relayoutQueued = false;
+    const next = layoutFor();
+    if (next !== layout) {
+      layout = next;
+      applyLayoutClass();
+      if (state === 'intro' && gridKey !== layout) buildBoard();
+    }
+    resize();
+  }
+  function queueRelayout() {
+    if (relayoutQueued) return;
+    relayoutQueued = true;
+    requestAnimationFrame(relayout);
+  }
+  window.addEventListener('resize', queueRelayout);
+  window.addEventListener('orientationchange', () => { queueRelayout(); setTimeout(relayout, 300); });
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', queueRelayout);
 
   let last = performance.now();
   function frame(now) {
@@ -1275,8 +1535,9 @@
   });
 
   // Small hook for automated tests.
-  window.__coinCrossing = { quiz: QUIZ, get state() { return state; }, get target() { return target; }, get coins() { return coins; }, get player() { return player; }, total, get level() { return g.level; } };
+  window.__coinCrossing = { quiz: QUIZ, get state() { return state; }, get target() { return target; }, get coins() { return coins; }, get player() { return player; }, total, get level() { return g.level; }, get layout() { return layout; }, get lanes() { return lanes; }, get grid() { return { cols: COLS, rows: ROWS, castle: CASTLE_H, w: W, h: H }; } };
 
+  syncMusicBtn();
   resize();
   MQ.Music.play('prelude');
   newLevel();

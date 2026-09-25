@@ -2,38 +2,54 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Math Quest">
+  <meta name="theme-color" content="#fff8ec">
+  <link rel="manifest" href="../../manifest.webmanifest">
+  <link rel="apple-touch-icon" href="../../icons/icon-180.png">
   <title>Coin Crossing</title>
-  <link rel="stylesheet" href="../../shared/style.css?v=5">
-  <link rel="stylesheet" href="game.css?v=5">
+  <link rel="stylesheet" href="../../shared/style.css?v=6">
+  <link rel="stylesheet" href="game.css?v=6">
 </head>
 <body>
-  <main class="layout">
-    <div class="stage" id="stage">
-      <canvas id="board" aria-label="Coin Crossing game board"></canvas>
-      <div class="overlay" id="overlay" hidden></div>
+  <main class="layout" id="layout">
+    <div class="stage-wrap" id="stage-wrap">
+      <div class="stage" id="stage">
+        <canvas id="board" aria-label="Coin Crossing game board"></canvas>
+        <div class="touch-hint" id="touch-hint" hidden>
+          <div class="finger">👆</div>
+          <div class="hint-text">Tap to hop ⬆<br>Swipe to turn ↔</div>
+        </div>
+        <div class="overlay" id="overlay" hidden></div>
+      </div>
     </div>
 
     <aside class="panel">
-      <div class="panel-top">
-        <a class="home" href="../../index.html" title="Back to the portal">🏠</a>
-        <div class="level-pill">Level <span id="level">1</span></div>
-        <div class="star-pill">⭐ <span id="stars">0</span></div>
+      <div class="hud">
+        <div class="panel-top">
+          <a class="home" href="../../index.html" title="Back to the portal">🏠</a>
+          <div class="level-pill"><span class="lvl-word">Level </span><span id="level">1</span></div>
+          <div class="star-pill">⭐ <span id="stars">0</span></div>
+        </div>
+
+        <section class="box target-box">
+          <div class="label">🏰 Castle needs</div>
+          <div class="big" id="target">—</div>
+          <div class="zh sub" id="target-zh"></div>
+          <div class="need need2" id="need2"></div>
+        </section>
+
+        <section class="box pouch-box">
+          <div class="label">👝 In your pouch</div>
+          <div class="big" id="pouch">0¢</div>
+          <div class="zh sub" id="pouch-zh"></div>
+          <div class="pouch-coins" id="pouch-coins"></div>
+          <div class="need" id="need"></div>
+        </section>
       </div>
-
-      <section class="box target-box">
-        <div class="label">🏰 Castle needs</div>
-        <div class="big" id="target">—</div>
-        <div class="zh sub" id="target-zh"></div>
-      </section>
-
-      <section class="box pouch-box">
-        <div class="label">👝 In your pouch</div>
-        <div class="big" id="pouch">0¢</div>
-        <div class="zh sub" id="pouch-zh"></div>
-        <div class="pouch-coins" id="pouch-coins"></div>
-        <div class="need" id="need"></div>
-      </section>
 
       <section class="bubble" id="bubble" aria-live="polite">
         <span class="mascot">🐼</span>
@@ -46,10 +62,16 @@
         <div><span class="key">esc</span> pause</div>
         <div><span class="key">M</span> music on / off</div>
       </section>
+
+      <nav class="touchbar" aria-label="Game buttons">
+        <button class="tbtn back" id="btn-back" type="button">↩ Put back</button>
+        <button class="tbtn icon" id="btn-pause" type="button" aria-label="Pause">⏸</button>
+        <button class="tbtn icon" id="btn-music" type="button" aria-label="Music on or off">🎵</button>
+      </nav>
     </aside>
   </main>
 
-  <script src="../../shared/core.js?v=5"></script>
-  <script src="game.js?v=5"></script>
+  <script src="../../shared/core.js?v=6"></script>
+  <script src="game.js?v=6"></script>
 </body>
 </html>

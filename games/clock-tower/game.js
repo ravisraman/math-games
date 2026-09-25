@@ -25,6 +25,18 @@
   const HOUR_COLOR = '#e0473c';
   const MIN_COLOR = '#2f6fd6';
 
+  // ---------- Phone layouts ----------
+  // 'desk' is the original 1040×760 board. On phones the same canvas is drawn in CSS pixels with
+  // its own composition ('portrait' or 'landscape'): the clock, tower and banner are the same
+  // drawings placed with transforms, plus big touch buttons under / beside the clock.
+  let mode = 'desk';
+  let LW = W;                // canvas size in drawing units (board units on desk, CSS px on phones)
+  let LH = H;
+  let PL = null;             // phone layout geometry (see computeLayout)
+  const HUD_H = 52;          // room for the HTML HUD strip on phones
+  const CLOCK_OUT = R + 64;  // clock radius including the ":05" labels, in board units
+  const isPhone = () => mode !== 'desk';
+
   const SKILLS = {
     set: 'Setting the clock',
     read: 'Reading the clock',
@@ -583,6 +595,15 @@
   let hits = [];
   let bellAmp = 0;
   let skyProgress = 0; // 0 = morning, 1 = golden hour (follows the climb)
+  let towerK = 0;      // phones: 0 = playing (clock centre stage), 1 = celebration (tower centre stage)
+  let toastText = '';  // phones: a hint / message shown in the banner for a few seconds
+  let toastUntil = 0;
+  let bannerPulseAt = -9;
+  let pressedId = null; // phones: which on-canvas button is being pressed (drawn pushed in)
+  let pressUntil = 0;
+  let hold = null;      // press-and-hold auto-repeat on the hand buttons
+  let usedKeys = false; // show the keyboard selection highlight only after an arrow key
+  const coachSeen = { set: false, choice: false }; // 👆 finger coach, once per session each
 
   // Clock hands: `clockT` is the logical time (an unbounded number of minutes so hands can
   // spin past 12 smoothly); `disp` is what's drawn and glides toward it.
@@ -669,10 +690,12 @@
     if (data.settings.chinese && q.mode === 'set' && q.type === 'set') MQ.Voice.say(q.zh, 'zh-CN');
     if (q.mode === 'set') {
       say(stats.asked <= 1 && g.played < 3
-        ? 'Press → and ← to move the long blue hand. ↑ and ↓ move the short red hand. Then press return!'
-        : `${plain(q.lines.join(' '))} Press return when it's ready.`);
+        ? (MQ.isTouch
+          ? 'Drag the long blue hand and the short red hand with your finger. Then tap ✔ Check!'
+          : 'Press → and ← to move the long blue hand. ↑ and ↓ move the short red hand. Then press return!')
+        : `${plain(q.lines.join(' '))} ${MQ.isTouch ? 'Tap ✔ Check' : 'Press return'} when it's ready.`);
     } else {
-      say(`${plain(q.lines.join(' '))} Pick with ← → and press return.`);
+      say(`${plain(q.lines.join(' '))} ${MQ.isTouch ? 'Tap your answer.' : 'Pick with ← → and press return.'}`);
     }
   }
 
@@ -741,10 +764,11 @@
     const zhPart = q.zhAfter || (q.mode === 'set' ? q.zh : '');
     fbZh = data.settings.chinese ? `${praise.zh} ${zhPart}` : '';
     revealClock(false);
-    const p = heroPos(floor);
+    const p = heroScreen(floor);
     burst(p.x, p.y, '#ffd23f', 18);
-    floaters.push({ x: p.x + 30, y: p.y - 20, text: floor >= FLOORS ? 'Top!' : `+1 🪟`, life: 1.2 });
-    burst(CX, CY - R * 0.3, '#ffe27a', 14);
+    floaters.push({ x: p.x + (mode === 'portrait' ? 0 : 30), y: p.y - (mode === 'portrait' ? 26 : 20), text: floor >= FLOORS ? 'Top!' : `+1 🪟`, life: 1.2 });
+    const c = clockToScreen(CX, CY - R * 0.3);
+    burst(c.x, c.y, '#ffe27a', 14);
     say(`${praise.zh} ${praise.en} ${floor >= FLOORS ? 'You reached the top!' : `Floor ${floor}!`}`);
     if (data.settings.chinese) MQ.Voice.say(`${praise.zh} ${zhPart}`, 'zh-CN', { interrupt: true });
     else MQ.Voice.say(praise.en, 'en-US', { interrupt: true });
@@ -768,12 +792,12 @@
     }
     revealClock(true);
     const cheer = wrongStreak >= 2 ? ` ${MQ.CHEER.zh} (${MQ.CHEER.py})` : '';
-    say(`Look at the clock: this is ${q.answerText}.${cheer} We'll try one like this again soon. Press return to go on.`);
+    say(`Look at the clock: this is ${q.answerText}.${cheer} We'll try one like this again soon. ${MQ.isTouch ? 'Tap Next ▶' : 'Press return'} to go on.`);
     MQ.Voice.say(`${opener} The answer is ${q.answerSpeak || speakTime(q.target)}.`, 'en-US', { interrupt: true });
   }
 
-  function advance() {
-    if (state !== 'play' || phase !== 'feedback' || time - answeredAt < 0.35) return;
+  function advance(minWait = 0.35) {
+    if (state !== 'play' || phase !== 'feedback' || time - answeredAt < minWait) return;
     autoNextAt = 0;
     if (floor >= FLOORS) finishRound();
     else nextQuestion();
@@ -801,6 +825,13 @@
       text = 'a.m. = morning, before lunch ☀️. p.m. = afternoon and night 🌙.';
     }
     say(`💡 ${text}`, { speak: true });
+    if (isPhone()) toast(`💡 ${text}`, 7);
+  }
+
+  // Phones: show a short message in the question banner for a few seconds.
+  function toast(text, secs = 4) {
+    toastText = text;
+    toastUntil = time + secs;
   }
 
   // ---------- Tower climb + end of round ----------
@@ -824,12 +855,17 @@
         MQ.Sound.note(48, 'bell', { dur: 3, vel: 0.25 });
         MQ.Sound.note(60, 'bell', { dur: 2.2, vel: 0.08 });
         bellAmp = 1;
-        burst(T_CX, 160, '#ffe27a', 16);
+        const b = towerToScreen(T_CX, 160);
+        burst(b.x, b.y, '#ffe27a', 16);
       }, 700 + i * 950);
     }
     setTimeout(() => {
       MQ.Sound.win();
-      for (let i = 0; i < 6; i++) setTimeout(() => confetti(rand(300, 1000), rand(160, 420)), i * 140);
+      for (let i = 0; i < 6; i++) {
+        setTimeout(() => (isPhone()
+          ? confetti(rand(Math.round(LW * 0.1), Math.round(LW * 0.9)), rand(Math.round(LH * 0.2), Math.round(LH * 0.55)))
+          : confetti(rand(300, 1000), rand(160, 420))), i * 140);
+      }
       const praise = MQ.pick(MQ.PRAISE);
       if (data.settings.chinese) MQ.Voice.say(praise.zh, 'zh-CN', { interrupt: true });
       else MQ.Voice.say(praise.en, 'en-US', { interrupt: true });
@@ -892,8 +928,11 @@
         </div>
         <div class="next">${move}</div>
         ${newHero ? `<div class="next">🎉 New hero unlocked: ${newHero.emoji} ${newHero.name}! Pick it in the portal.</div>` : ''}
-        <button class="btn start" id="again">Climb again ▶</button>
-        <div class="press">Press <span class="key">return</span> to climb again</div>
+        <div class="btn-row">
+          <button class="btn start" id="again">Climb again ▶</button>
+          <a class="btn secondary home-link phone-only" href="../../index.html">🏠 Portal</a>
+        </div>
+        <div class="press keys-only">Press <span class="key">return</span> to climb again</div>
       </div>`,
       (k) => { if (k === 'Enter' || k === ' ') nextRound(); }
     );
@@ -917,6 +956,13 @@
     el('floor').textContent = floor >= FLOORS ? 'Top of the tower! 🔔' : `Floor ${floor} of ${FLOORS}`;
     el('skill').textContent = state === 'celebrate' || state === 'result' ? '🔔 Ring the bell!' : q ? SKILL_TAG[q.type] : '🕰️ Clock Tower';
     el('level-title').textContent = `Level ${g.level}: ${cfgFor(g.level).title}`;
+    el('plevel').textContent = g.level;
+    el('pstars').textContent = data.stars;
+    const musicOn = data.settings.music !== false;
+    for (const id of ['pmusic', 'tmusic']) {
+      el(id).textContent = musicOn ? '🎵' : '🔇';
+      el(id).classList.toggle('off', !musicOn);
+    }
   }
 
   function say(text, { speak = false } = {}) {
@@ -932,6 +978,7 @@
   window.addEventListener('keydown', (e) => {
     const k = e.key;
     if (k.startsWith('Arrow') || k === ' ' || k === 'Enter' || k === 'Escape') e.preventDefault();
+    if (k.startsWith('Arrow')) usedKeys = true;
     MQ.Sound.ensure();
     if ((k === 'm' || k === 'M') && !e.repeat) { toggleMusic(); return; }
     if (state === 'play') { playKey(k, e); return; }
@@ -966,21 +1013,78 @@
     MQ.applySettings(data.settings);
     persist();
     say(data.settings.music ? '🎵 Music on' : '🔇 Music off');
+    if (isPhone() && state === 'play') toast(data.settings.music ? '🎵 Music on' : '🔇 Music off', 1.6);
+    updateHud();
   }
 
-  // Mouse / trackpad: click choices and buttons, drag the clock hands.
+  // On-screen pause + music buttons (phone HUD, and the side panel on touch tablets).
+  for (const id of ['ppause', 'tpause']) {
+    el(id).addEventListener('click', () => { MQ.Sound.click(); if (state === 'play') showPause(); });
+  }
+  for (const id of ['pmusic', 'tmusic']) {
+    el(id).addEventListener('click', () => { MQ.Sound.click(); toggleMusic(); });
+  }
+
+  // Mouse / trackpad / finger: tap choices and buttons, drag the clock hands.
   function toBoard(e) {
     const r = canvas.getBoundingClientRect();
-    return { x: ((e.clientX - r.left) / r.width) * W, y: ((e.clientY - r.top) / r.height) * H };
+    return { x: ((e.clientX - r.left) / r.width) * LW, y: ((e.clientY - r.top) / r.height) * LH };
   }
   const inside = (p, b) => p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h;
+  // Phones: screen point → the clock's own board coordinates (so dragTo works unchanged).
+  function toClock(p) {
+    if (!isPhone()) return p;
+    const s = PL.s * PL.clockZoom;
+    return { x: CX + (p.x - PL.cx) / s, y: CY + (p.y - PL.cy) / s };
+  }
+
+  function pressHit(hit, e) {
+    pressedId = hit.id || null;
+    pressUntil = time + 0.16;
+    hit.fn();
+    if (hit.repeat) {
+      stopHold();
+      const tick = () => {
+        if (!hold || state !== 'play' || phase !== 'ask') { stopHold(); return; }
+        hit.fn();
+        pressUntil = time + 0.16;
+        hold.timer = setTimeout(tick, 110);
+      };
+      hold = { rect: hit, pointerId: e.pointerId, timer: setTimeout(tick, 430) };
+    }
+  }
+  function stopHold() {
+    if (hold) clearTimeout(hold.timer);
+    hold = null;
+    pressedId = null;
+  }
+
+  // Which hand did the finger grab? The one it's closest to (measured along each hand);
+  // far from both, the outer ring means the long hand and the middle means the short hand.
+  function pickHand(c) {
+    const dx = c.x - CX;
+    const dy = c.y - CY;
+    const segDist = (ang, len) => {
+      const a = (ang * Math.PI) / 180;
+      const ux = Math.sin(a);
+      const uy = -Math.cos(a);
+      const t = Math.max(0, Math.min(len, dx * ux + dy * uy));
+      return Math.hypot(dx - ux * t, dy - uy * t);
+    };
+    const dm = segDist(minuteAngle(disp), R * 0.88);
+    const dh = segDist(hourAngle(disp), R * 0.54);
+    const near = 46 / (PL.s * PL.clockZoom); // ~46 screen px either side of a hand
+    if (Math.min(dm, dh) < near) return { hand: dm <= dh ? 'minute' : 'hour', grabbed: true };
+    return { hand: Math.hypot(dx, dy) > R * 0.62 ? 'minute' : 'hour', grabbed: false };
+  }
 
   canvas.addEventListener('pointerdown', (e) => {
     MQ.Sound.ensure();
     if (state !== 'play') return;
     const p = toBoard(e);
     const hit = hits.find((h) => inside(p, h));
-    if (hit) { hit.fn(); return; }
+    if (hit) { pressHit(hit, e); return; }
+    if (isPhone()) { phoneDown(p, e); return; }
     if (q && phase === 'ask' && inside(p, BANNER)) { MQ.Voice.say(q.speak, 'en-US', { interrupt: true }); return; }
     if (phase === 'feedback') { advance(); return; }
     if (phase === 'ask' && q && q.mode === 'set') {
@@ -992,19 +1096,48 @@
       }
     }
   });
+
+  function phoneDown(p, e) {
+    if (q && inside(p, PL.banner)) {
+      // Tap the banner: hear the question again.
+      toastUntil = 0;
+      bannerPulseAt = time;
+      MQ.Sound.click();
+      if (phase === 'ask') MQ.Voice.say(q.speak, 'en-US', { interrupt: true });
+      return;
+    }
+    if (phase === 'ask' && q && q.mode === 'set') {
+      const c = toClock(p);
+      if (Math.hypot(c.x - CX, c.y - CY) < R + 64) {
+        const pick2 = pickHand(c);
+        drag = pick2.hand;
+        coachSeen.set = true;
+        try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+        MQ.Sound.note(drag === 'minute' ? 79 : 72, 'wood', { dur: 0.05, vel: 0.35 });
+        // Grabbing a hand never makes it jump; tapping empty face moves that hand there.
+        if (!pick2.grabbed) dragTo(c);
+      }
+    }
+  }
+
   canvas.addEventListener('pointermove', (e) => {
     const p = toBoard(e);
-    if (drag) { dragTo(p); return; }
+    if (drag) { dragTo(toClock(p)); return; }
+    if (hold && !inside(p, hold.rect)) stopHold();
+    if (isPhone()) return;
     const overHit = hits.some((h) => inside(p, h));
     const overClock = state === 'play' && phase === 'ask' && q && q.mode === 'set' && Math.hypot(p.x - CX, p.y - CY) < R + 30;
     canvas.style.cursor = overHit ? 'pointer' : overClock ? 'grab' : 'default';
   });
-  const endDrag = () => { drag = null; };
+  const endDrag = () => { drag = null; stopHold(); };
   canvas.addEventListener('pointerup', endDrag);
   canvas.addEventListener('pointercancel', endDrag);
+  window.addEventListener('pointerup', () => stopHold());
 
   function dragTo(p) {
     if (state !== 'play' || phase !== 'ask' || !q || q.mode !== 'set') { drag = null; return; }
+    // Right at the centre the angle is jumpy under a finger — wait until it moves out a little.
+    if (isPhone() && Math.hypot(p.x - CX, p.y - CY) < R * 0.2) return;
     let a = (Math.atan2(p.x - CX, -(p.y - CY)) * 180) / Math.PI;
     if (a < 0) a += 360;
     const step = cfg.step;
@@ -1038,10 +1171,15 @@
     state = 'intro';
     const first = g.played === 0;
     const how = `
-      <div class="how">
+      <div class="how keys-only">
         <div>🕰️ <span class="hand blue">Long blue hand</span> = minutes: <span class="key">←</span> <span class="key">→</span></div>
         <div>🕰️ <span class="hand red">Short red hand</span> = hour: <span class="key">↑</span> <span class="key">↓</span></div>
         <div>✅ Press <span class="key">return</span> to check · <span class="key">H</span> for a hint</div>
+      </div>
+      <div class="how touch-only">
+        <div>👆 Drag the <span class="hand blue">long blue hand</span> = minutes</div>
+        <div>👆 Drag the <span class="hand red">short red hand</span> = hour</div>
+        <div>✅ Tap <b>✔ Check</b> · 💡 for a hint</div>
       </div>`;
     showOverlay(`
       <div class="card">
@@ -1052,13 +1190,14 @@
         <p>Every right answer lights a window 🪟.<br>Climb 8 floors and ring the big bell 🔔!</p>
         ${first ? how : ''}
         <button class="btn start" id="go">Start climbing ▶</button>
-        <div class="press">Press <span class="key">return</span> to start</div>
+        <div class="press keys-only">Press <span class="key">return</span> to start</div>
+        <div class="press touch-only">Tap <b>Start</b> when you're ready!</div>
       </div>`,
       (k) => { if (k === 'Enter' || k === ' ') startPlay(); }
     );
     el('go').addEventListener('click', startPlay);
     MQ.Voice.say(`Clock Tower. Level ${g.level}. ${cfg.title.replace('&', 'and')}.`, 'en-US', { interrupt: true });
-    say(`Level ${g.level}: ${cfg.title}. Press return to start!`);
+    say(`Level ${g.level}: ${cfg.title}. ${MQ.isTouch ? 'Tap Start!' : 'Press return to start!'}`);
     updateHud();
   }
 
@@ -1071,15 +1210,17 @@
 
   function showPause() {
     state = 'pause';
+    drag = null;
+    stopHold();
     MQ.Voice.stop();
     let sel2 = 0;
-    const items = [['▶ Keep playing', () => { hideOverlay(); state = 'play'; }], ['🏠 Back to the portal', () => { persist(); location.href = '../../index.html'; }]];
+    const items = [['▶ Keep playing', () => { hideOverlay(); state = 'play'; MQ.Sound.click(); }], ['🏠 Back to the portal', () => { persist(); location.href = '../../index.html'; }]];
     const render = () => {
       showOverlay(`
         <div class="card">
           <h2>⏸ Paused</h2>
           <div class="menu">${items.map((it, i) => `<button class="btn ${i === 0 ? '' : 'secondary'} ${i === sel2 ? 'sel' : ''}" data-i="${i}">${it[0]}</button>`).join('')}</div>
-          <div class="press">Use <span class="key">↑</span> <span class="key">↓</span> and <span class="key">return</span></div>
+          <div class="press keys-only">Use <span class="key">↑</span> <span class="key">↓</span> and <span class="key">return</span></div>
         </div>`,
         (k) => {
           if (k === 'ArrowUp' || k === 'ArrowDown') { sel2 = 1 - sel2; render(); }

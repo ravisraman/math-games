@@ -2,15 +2,30 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Math Quest">
+  <meta name="theme-color" content="#fff8ec">
+  <link rel="manifest" href="../../manifest.webmanifest">
+  <link rel="apple-touch-icon" href="../../icons/icon-180.png">
   <title>Clock Tower</title>
-  <link rel="stylesheet" href="../../shared/style.css?v=5">
-  <link rel="stylesheet" href="game.css?v=5">
+  <link rel="stylesheet" href="../../shared/style.css?v=6">
+  <link rel="stylesheet" href="game.css?v=6">
 </head>
 <body>
   <main class="layout">
     <div class="stage" id="stage">
       <canvas id="board" aria-label="Clock Tower game board"></canvas>
+      <!-- Phone HUD (portrait: top strip, landscape: top of the right column) -->
+      <div class="phone-hud" id="phud">
+        <a class="ph-btn" href="../../index.html" aria-label="Back to the portal">🏠</a>
+        <div class="ph-pill">Level <b id="plevel">1</b></div>
+        <div class="ph-pill">⭐ <b id="pstars">0</b></div>
+        <button class="ph-btn" id="ppause" type="button" aria-label="Pause">⏸</button>
+        <button class="ph-btn" id="pmusic" type="button" aria-label="Music on or off">🎵</button>
+      </div>
       <div class="overlay" id="overlay" hidden></div>
     </div>
 
@@ -18,6 +33,8 @@
       <div class="panel-top">
         <a class="home" href="../../index.html" title="Back to the portal">🏠</a>
         <div class="level-pill">Level <span id="level">1</span></div>
+        <button class="home touch-only" id="tpause" type="button" aria-label="Pause">⏸</button>
+        <button class="home touch-only" id="tmusic" type="button" aria-label="Music on or off">🎵</button>
         <div class="star-pill">⭐ <span id="stars">0</span></div>
       </div>
 
@@ -38,16 +55,20 @@
         <span id="message">Let's climb the clock tower!</span>
       </section>
 
-      <section class="controls">
+      <section class="controls keys-only">
         <div><span class="key">←</span><span class="key">→</span> long hand · choose</div>
         <div><span class="key">↑</span><span class="key">↓</span> short hand (hour)</div>
         <div><span class="key">return</span> check</div>
         <div><span class="key">H</span> hint &nbsp; <span class="key">esc</span> pause &nbsp; <span class="key">M</span> music</div>
       </section>
+      <section class="controls touch-only">
+        <div>👆 Drag the clock hands, or tap a choice</div>
+        <div>✔ Check · 💡 Hint · ⏸ Pause · 🎵 Music</div>
+      </section>
     </aside>
   </main>
 
-  <script src="../../shared/core.js?v=5"></script>
-  <script src="game.js?v=5"></script>
+  <script src="../../shared/core.js?v=6"></script>
+  <script src="game.js?v=6"></script>
 </body>
 </html>
