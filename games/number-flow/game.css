@@ -3,6 +3,8 @@ body { background: radial-gradient(ellipse at 30% 0%, #fbe3d0 0%, #e9ddf7 45%, #
 
 .layout {
   height: 100%;
+  height: 100vh;
+  height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -179,7 +181,152 @@ body { background: radial-gradient(ellipse at 30% 0%, #fbe3d0 0%, #e9ddf7 45%, #
 .btn .key { color: var(--ink); margin-left: 6px; }
 .menu .btn.sel { outline: 4px solid var(--sky); outline-offset: 3px; }
 
-@media (max-width: 860px) {
-  .layout { flex-direction: column; }
-  .panel { width: 100%; max-width: 600px; }
+/* ---------- On-screen buttons (phones, tablets, narrow windows) ---------- */
+.touchbar { display: none; gap: 8px; }
+html.touch .touchbar, html.nf-compact .touchbar { display: flex; }
+.tb {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 56px;
+  border: none;
+  border-radius: 16px;
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 4px 0 #cfc6ea;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 4px 2px;
+  transition: transform 0.08s;
+  -webkit-tap-highlight-color: transparent;
 }
+.tb:active { transform: translateY(3px); box-shadow: 0 1px 0 #cfc6ea; }
+.tb .ic { font-size: 24px; line-height: 1.05; font-weight: 900; }
+.tb .tl { font-size: 14px; font-weight: 800; color: var(--muted); white-space: nowrap; }
+.tb-hint { background: #fff4c2; box-shadow: 0 4px 0 #e9cf6a; }
+.tb-hint:active { box-shadow: 0 1px 0 #e9cf6a; }
+.tb.off .ic { filter: grayscale(1); opacity: 0.6; }
+.card .go { margin-top: 14px; min-width: 180px; min-height: 56px; font-size: 22px; }
+
+/* ---------- Compact layout (phones: set by game.js as html.nf-compact) ---------- */
+html.nf-compact .layout {
+  display: grid;
+  gap: 6px;
+  padding:
+    max(6px, env(safe-area-inset-top))
+    max(6px, env(safe-area-inset-right))
+    max(6px, env(safe-area-inset-bottom))
+    max(6px, env(safe-area-inset-left));
+  align-items: stretch;
+  justify-items: stretch;
+}
+html.nf-compact .panel { display: contents; }
+html.nf-compact .controls { display: none; }
+html.nf-compact .label { display: none; }
+html.nf-compact .stage { justify-self: center; align-self: center; border-radius: 16px; box-shadow: 0 8px 22px rgba(40, 30, 90, 0.3); }
+html.nf-compact .panel-top { grid-area: top; min-width: 0; }
+html.nf-compact .pairs-box { grid-area: pairs; }
+html.nf-compact .sum-box { grid-area: sum; }
+html.nf-compact .bubble { grid-area: bubble; }
+html.nf-compact .touchbar { grid-area: bar; }
+html.nf-compact .stage { grid-area: stage; }
+
+html.nf-compact .home {
+  width: 46px; height: 46px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 24px; border-radius: 14px;
+}
+html.nf-compact .level-pill, html.nf-compact .star-pill { font-size: 18px; padding: 8px 14px; }
+
+html.nf-compact .box { padding: 5px 10px; border-radius: 16px; }
+html.nf-compact .pairs { margin-top: 0; gap: 6px; flex-wrap: nowrap; justify-content: center; min-height: 38px; }
+html.nf-compact .chip {
+  flex-direction: row; width: auto; gap: 5px;
+  padding: 2px 8px 2px 3px; border-radius: 999px; min-width: 0;
+}
+html.nf-compact .chip .dot { width: 32px; height: 32px; font-size: 15px; box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.18); }
+html.nf-compact .chip .zhn { display: none; }
+html.nf-compact .chip .status { font-size: 17px; min-width: 1.1em; text-align: center; }
+
+html.nf-compact .sum-box { padding: 5px 12px 6px; border-width: 3px; text-align: center; }
+html.nf-compact .sentence { font-size: 27px; margin-top: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.nf-compact .sentence.long { font-size: 21px; }
+html.nf-compact .sentence .dot.small { width: 28px; height: 28px; font-size: 14px; vertical-align: 3px; }
+html.nf-compact .sub { font-size: 15px; min-height: 0; }
+html.nf-compact .need { font-size: 16px; margin-top: 1px; min-height: 1.25em; }
+
+html.nf-compact .bubble {
+  font-size: 16px; padding: 6px 10px; min-height: 0; overflow: hidden;
+  align-items: center; border-width: 2px; line-height: 1.25;
+}
+html.nf-compact .bubble .mascot { font-size: 28px; }
+
+/* Portrait: top strip, chips, "Adding up" strip, full-width board, panda, button bar. */
+html.nf-portrait .layout {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+  grid-template-areas: "top" "pairs" "sum" "stage" "bubble" "bar";
+}
+
+/* Landscape: board on the left, slim column on the right. */
+html.nf-land .layout {
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  grid-template-areas: "stage top" "stage pairs" "stage sum" "stage bubble" "stage bar";
+  column-gap: 12px;
+  row-gap: 5px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+html.nf-land .home { width: 44px; height: 44px; }
+html.nf-land .level-pill, html.nf-land .star-pill { font-size: 17px; padding: 7px 12px; }
+html.nf-land .pairs { justify-content: flex-start; flex-wrap: wrap; }
+html.nf-land .sum-box { text-align: left; }
+html.nf-land .bubble { font-size: 15px; }
+html.nf-land .tb { min-height: 50px; }
+html.nf-land .tb .ic { font-size: 22px; }
+
+/* Overlay cards cover the whole phone screen instead of just the board. */
+html.nf-compact .overlay {
+  position: fixed;
+  z-index: 50;
+  padding:
+    max(12px, env(safe-area-inset-top))
+    max(12px, env(safe-area-inset-right))
+    max(12px, env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
+}
+html.nf-compact .card {
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 18px 14px;
+  border-radius: 22px;
+}
+html.nf-compact .card h1 { font-size: 30px; }
+html.nf-compact .card h2 { font-size: 25px; }
+html.nf-compact .card p { font-size: 18px; }
+html.nf-compact .card .stars-row { font-size: 46px; }
+html.nf-compact .card .sums > div { font-size: 19px; }
+html.nf-compact .demo { gap: 4px; }
+html.nf-land .card { max-width: 640px; padding: 10px 18px; }
+html.nf-land .card h1 { font-size: 26px; margin-bottom: 0; }
+html.nf-land .card h2 { font-size: 22px; margin-bottom: 2px; }
+html.nf-land .card p { font-size: 17px; margin: 4px 0; }
+html.nf-land .card .stars-row { font-size: 36px; margin: 0; }
+html.nf-land .card .praise { font-size: 22px; }
+html.nf-land .card .sums { margin: 6px auto 2px; gap: 3px; }
+html.nf-land .card .sums > div { font-size: 17px; }
+html.nf-land .card .go { margin-top: 8px; min-height: 50px; }
+html.nf-land .card .targets { margin: 6px 0 2px; }
+html.nf-land .card .targets .dot { width: 46px; height: 46px; font-size: 19px; }
+html.nf-land .demo { margin: 4px 0 0; }
+html.nf-land .card .menu { margin-top: 8px; }
+html.nf-land .demo .dot { width: 38px; height: 38px; font-size: 17px; }
+html.nf-land .demo .bead { width: 34px; height: 34px; font-size: 17px; border-width: 3px; }
+html.nf-land .demo-eq { font-size: 19px; }
+html.nf-land .card .hint { font-size: 15px; }
+html.nf-land .card .targets .zhn { margin-top: 1px; font-size: 13px; }
+html.nf-land .card .go { margin-top: 6px; }

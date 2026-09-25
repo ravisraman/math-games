@@ -2,13 +2,20 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Math Quest">
+  <meta name="theme-color" content="#fff8ec">
+  <link rel="manifest" href="../../manifest.webmanifest">
+  <link rel="apple-touch-icon" href="../../icons/icon-180.png">
   <title>Number Flow</title>
-  <link rel="stylesheet" href="../../shared/style.css?v=5">
-  <link rel="stylesheet" href="game.css?v=5">
+  <link rel="stylesheet" href="../../shared/style.css?v=6">
+  <link rel="stylesheet" href="game.css?v=6">
 </head>
 <body>
-  <main class="layout">
+  <main class="layout" id="layout">
     <div class="stage" id="stage">
       <canvas id="board" aria-label="Number Flow puzzle board"></canvas>
       <div class="overlay" id="overlay" hidden></div>
@@ -16,7 +23,7 @@
 
     <aside class="panel">
       <div class="panel-top">
-        <a class="home" href="../../index.html" title="Back to the portal">🏠</a>
+        <a class="home" href="../../index.html" title="Back to the portal" aria-label="Back to the portal">🏠</a>
         <div class="level-pill">Level <span id="level">1</span></div>
         <div class="star-pill">⭐ <span id="stars">0</span></div>
       </div>
@@ -38,17 +45,24 @@
         <span id="message">Move to a dot and press space!</span>
       </section>
 
-      <section class="controls">
+      <section class="controls keys-only">
         <div><span class="key">←</span><span class="key">↑</span><span class="key">↓</span><span class="key">→</span> move / draw</div>
         <div><span class="key">space</span> pick up a dot or path</div>
         <div><span class="key">esc</span> stop drawing / pause</div>
         <div><span class="key">H</span> hint 💡 <span class="dim">(costs a ⭐)</span></div>
         <div><span class="key">R</span> start over &nbsp; <span class="key">M</span> music</div>
       </section>
+
+      <nav class="touchbar" aria-label="Game buttons">
+        <button class="tb tb-hint" id="btn-hint" type="button"><span class="ic">💡</span><span class="tl">Hint</span></button>
+        <button class="tb" id="btn-reset" type="button"><span class="ic">↺</span><span class="tl">Start over</span></button>
+        <button class="tb" id="btn-pause" type="button"><span class="ic">⏸</span><span class="tl">Pause</span></button>
+        <button class="tb" id="btn-music" type="button"><span class="ic" id="music-ic">🎵</span><span class="tl" id="music-tl">Music</span></button>
+      </nav>
     </aside>
   </main>
 
-  <script src="../../shared/core.js?v=5"></script>
-  <script src="game.js?v=5"></script>
+  <script src="../../shared/core.js?v=6"></script>
+  <script src="game.js?v=6"></script>
 </body>
 </html>

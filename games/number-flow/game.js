@@ -173,6 +173,12 @@
   let time = 0;
   let lastSaveAt = 0;
   let geo = { cell: 100, x0: 0, y0: 0 };
+  let compact = false; // phone layout (set in resize)
+  // keyMode: show the keyboard cursor. Laptops start in it; phones switch to it only when keys are used.
+  let keyMode = !MQ.isTouch;
+  const kb = (keys, touch) => (keyMode ? keys : touch);
+  let ping = null; // rings on a dot ("start here!") after tapping an empty cell
+  let everDragged = false; // the 👆 demo hand shows until he first drags a path with a finger
 
   function newPuzzle() {
     puzzle = generate(g.level);
@@ -181,13 +187,19 @@
     active = 0;
     firstArrival = puzzle.pairs.map(() => true);
     stats = { hints: 0, resets: 0, wrongs: 0, undos: 0, seconds: 0 };
-    const n = puzzle.n;
-    const cell = Math.min(MAX_CELL, (W - PAD * 2) / n);
-    geo = { cell, x0: (W - cell * n) / 2, y0: (H - cell * n) / 2 };
+    computeGeo();
     cursor = puzzle.pairs[0].a;
     particles = []; floaters = []; lanterns = []; shimmers = [];
-    grow = null; hintFlash = null; wrongFlash = null;
+    grow = null; hintFlash = null; wrongFlash = null; ping = null;
     updateHud();
+  }
+
+  function computeGeo() {
+    if (!puzzle) return;
+    const n = puzzle.n;
+    const pad = compact ? 10 : PAD; // phones: the board uses (almost) the whole canvas
+    const cell = Math.min(MAX_CELL, (W - pad * 2) / n);
+    geo = { cell, x0: (W - cell * n) / 2, y0: (H - cell * n) / 2 };
   }
 
   // ---------- Puzzle logic ----------
@@ -227,11 +239,11 @@
     MQ.Sound.note(67, 'bell', { dur: 0.6, vel: 0.12 });
     const pr = puzzle.pairs[p];
     if (paths[p].length === 1) {
-      say(`${pr.color.emoji} Make ${pr.target}! Walk with the arrows to the other ${pr.color.emoji} ${pr.target}.`);
+      say(kb(`${pr.color.emoji} Make ${pr.target}! Walk with the arrows to the other ${pr.color.emoji} ${pr.target}.`, `${pr.color.emoji} Make ${pr.target}! Drag to the other ${pr.color.emoji} ${pr.target}.`));
       MQ.Voice.say(`Make ${pr.target}`, 'en-US', { interrupt: true });
       if (data.settings.chinese) MQ.Voice.say(MQ.zhNumber(pr.target), 'zh-CN');
     } else {
-      say(`${pr.color.emoji} Keep going! Use the arrows. Step back to undo.`);
+      say(kb(`${pr.color.emoji} Keep going! Use the arrows. Step back to undo.`, `${pr.color.emoji} Keep going! Slide back to undo.`));
     }
     updateHud();
   }
@@ -242,7 +254,7 @@
     drawing = -1;
     if (msg !== false) {
       const pr = puzzle.pairs[p];
-      if (!isCorrect(p)) say(msg || `${pr.color.emoji} Paused. Press space on the path to keep going.`);
+      if (!isCorrect(p)) say(msg || kb(`${pr.color.emoji} Paused. Press space on the path to keep going.`, `${pr.color.emoji} Touch the path to keep going.`));
     }
     updateHud();
   }
@@ -417,7 +429,7 @@
     MQ.Sound.star();
     if (h === partnerOf(p, next[0])) { arrive(p); return; }
     const num = puzzle.cells[h].num;
-    say(`💡 Try going through the ${num} next! ${moved ? '(I moved another path out of the way.) ' : ''}Keep going with the arrows.`);
+    say(`💡 Try going through the ${num} next! ${moved ? '(I moved another path out of the way.) ' : ''}${kb('Keep going with the arrows.', 'Drag on from the end of the path.')}`);
     updateHud();
   }
 
@@ -453,7 +465,7 @@
     sent.classList.toggle('long', t.length > 3 || s >= 100);
     if (!t.length) {
       sent.innerHTML = `${dotHtml(pr, true)} <span class="eq">make</span> ${pr.target}`;
-      need.textContent = paths[p].length ? 'Walk to a number ➜' : 'Press space on a dot to start';
+      need.textContent = paths[p].length ? 'Walk to a number ➜' : kb('Press space on a dot to start', '👆 Drag from a dot to start');
     } else {
       sent.innerHTML = `${t.join(' + ')} <span class="eq">=</span> <span class="total">${s}</span>`;
       if (isCorrect(p)) { need.textContent = `✅ Exactly ${pr.target}!`; need.classList.add('done'); }
@@ -481,6 +493,7 @@
     const k = e.key;
     if (DIRS[k] || k === ' ' || k === 'Enter' || k === 'Escape') e.preventDefault();
     MQ.Sound.ensure();
+    if (state === 'play' && (DIRS[k] || k === ' ' || k === 'Enter') && !keyMode) { keyMode = true; updateHud(); }
 
     if ((k === 'm' || k === 'M') && !e.repeat) { toggleMusic(); return; }
     if (state === 'play') {
@@ -504,6 +517,13 @@
     MQ.applySettings(data.settings);
     persist();
     say(data.settings.music ? '🎵 Music on' : '🔇 Music off');
+    updateMusicBtn();
+  }
+  function updateMusicBtn() {
+    const on = data.settings.music !== false;
+    el('music-ic').textContent = on ? '🎵' : '🔇';
+    el('music-tl').textContent = on ? 'Music' : 'Music off';
+    el('btn-music').classList.toggle('off', !on);
   }
 
   function moveCursor(dr, dc) {
@@ -572,55 +592,130 @@
     updateHud();
   }
 
-  // Mouse / trackpad: press on a dot or path and drag through the cells, like Flow Free.
+  // Mouse / finger: press on a dot or path and drag through the cells, like Flow Free.
   let pointerDrawing = false;
-  function cellAt(ev) {
+  let pointerKind = 'mouse';
+  let fingerPt = null; // board coords of the finger while dragging (for the sum bubble)
+  let blocked = { head: -1, cells: new Set() }; // blocked moves already complained about
+  function boardPos(ev) {
     const rect = canvas.getBoundingClientRect();
-    const x = ((ev.clientX - rect.left) / rect.width) * W;
-    const y = ((ev.clientY - rect.top) / rect.height) * H;
-    const c = Math.floor((x - geo.x0) / geo.cell);
-    const r = Math.floor((y - geo.y0) / geo.cell);
+    return { x: ((ev.clientX - rect.left) / rect.width) * W, y: ((ev.clientY - rect.top) / rect.height) * H };
+  }
+  function cellAtPos(pt) {
+    const c = Math.floor((pt.x - geo.x0) / geo.cell);
+    const r = Math.floor((pt.y - geo.y0) / geo.cell);
     if (r < 0 || c < 0 || r >= puzzle.n || c >= puzzle.n) return -1;
     return r * puzzle.n + c;
   }
+  const grabbable = (i) => i >= 0 && (puzzle.cells[i].pair >= 0 || occupant(i) >= 0);
+  // Fingers are fat: if the touch lands just beside a dot or path, grab that instead.
+  function nearestGrabbable(pt, maxDist) {
+    let best = -1, bestD = maxDist;
+    for (let i = 0; i < puzzle.n * puzzle.n; i++) {
+      if (!grabbable(i)) continue;
+      const c = cellCenter(i);
+      const d = Math.hypot(c.x - pt.x, c.y - pt.y);
+      const bonus = puzzle.cells[i].pair >= 0 ? geo.cell * 0.1 : 0; // prefer dots
+      if (d - bonus < bestD) { bestD = d - bonus; best = i; }
+    }
+    return best;
+  }
   canvas.addEventListener('pointerdown', (ev) => {
     if (state !== 'play') return;
-    const i = cellAt(ev);
+    pointerKind = ev.pointerType || 'mouse';
+    const touchy = pointerKind !== 'mouse';
+    if (touchy && keyMode && MQ.isTouch) { keyMode = false; }
+    const pt = boardPos(ev);
+    let i = cellAtPos(pt);
+    if (touchy && !grabbable(i)) {
+      const j = nearestGrabbable(pt, geo.cell * 0.7);
+      if (j >= 0) i = j;
+    }
     if (i < 0) return;
     ev.preventDefault();
     if (drawing >= 0) release(false);
     cursor = i;
-    const cp = puzzle.cells[i].pair;
-    if (cp >= 0 || occupant(i) >= 0) {
+    blocked = { head: -1, cells: new Set() };
+    if (grabbable(i)) {
       pressCell(i, true);
       pointerDrawing = drawing >= 0;
+      fingerPt = pt;
       try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
+    } else if (touchy) {
+      // Tapped an empty number: show where paths start.
+      const j = nearestOpenDot(i);
+      MQ.Sound.click();
+      if (j >= 0) {
+        const pr = puzzle.pairs[puzzle.cells[j].pair];
+        ping = { i: j, t: 0 };
+        say(`Paths start on a dot 👆 Put your finger on the ${pr.color.emoji} ${pr.target} and drag!`);
+      }
+      updateHud();
     } else {
       MQ.Sound.click();
     }
   });
+  // Follow the finger: step along the dominant direction once it is well inside the next cell
+  // (a little dead zone stops diagonal wobble); fast swipes fill every cell on the way.
+  function followFinger(pt) {
+    const n = puzzle.n;
+    const fx = Math.max(0, Math.min(n - 0.001, (pt.x - geo.x0) / geo.cell));
+    const fy = Math.max(0, Math.min(n - 0.001, (pt.y - geo.y0) / geo.cell));
+    const TH = pointerKind === 'mouse' ? 0.5 : 0.6;
+    let guard = 0;
+    while (drawing >= 0 && guard++ < n * 3) {
+      const hi = head(drawing);
+      if (blocked.head !== hi) blocked = { head: hi, cells: new Set() };
+      const h = rc(hi);
+      const dx = fx - (h.c + 0.5), dy = fy - (h.r + 0.5);
+      const ax = Math.abs(dx), ay = Math.abs(dy);
+      if (ax <= TH && ay <= TH) break;
+      const moves = [];
+      if (ax >= ay) { moves.push([0, Math.sign(dx)]); if (ay > TH) moves.push([Math.sign(dy), 0]); }
+      else { moves.push([Math.sign(dy), 0]); if (ax > TH) moves.push([0, Math.sign(dx)]); }
+      let moved = false;
+      for (const [dr, dc] of moves) {
+        const target = (h.r + dr) * n + (h.c + dc);
+        if (blocked.cells.has(target)) continue;
+        if (step(dr, dc)) { moved = true; if (pointerKind !== 'mouse') everDragged = true; break; }
+        blocked.cells.add(target);
+      }
+      if (!moved) break;
+    }
+  }
   canvas.addEventListener('pointermove', (ev) => {
     if (!pointerDrawing || drawing < 0 || state !== 'play') return;
-    const i = cellAt(ev);
-    if (i < 0) return;
-    const n = puzzle.n;
-    let guard = 0;
-    while (drawing >= 0 && head(drawing) !== i && guard++ < 20) {
-      const h = rc(head(drawing));
-      const dr = Math.floor(i / n) - h.r;
-      const dc = (i % n) - h.c;
-      const moveRow = Math.abs(dr) >= Math.abs(dc);
-      const ok = moveRow ? step(Math.sign(dr), 0) : step(0, Math.sign(dc));
-      if (!ok) break;
-    }
+    ev.preventDefault();
+    const pt = boardPos(ev);
+    fingerPt = pt;
+    followFinger(pt);
   });
   const endPointer = () => {
+    fingerPt = null;
     if (!pointerDrawing) return;
     pointerDrawing = false;
     if (drawing >= 0) release(false);
   };
   canvas.addEventListener('pointerup', endPointer);
   canvas.addEventListener('pointercancel', endPointer);
+
+  // On-screen buttons (phones / tablets / narrow windows).
+  function tapButton(id, fn) {
+    let lastTap = 0;
+    el(id).addEventListener('click', (ev) => {
+      ev.preventDefault();
+      const now = performance.now();
+      if (now - lastTap < 350) return; // no accidental double taps
+      lastTap = now;
+      MQ.Sound.ensure();
+      fn();
+      el(id).blur();
+    });
+  }
+  tapButton('btn-hint', () => { if (state === 'play') { pointerDrawing = false; hint(); } });
+  tapButton('btn-reset', () => { if (state === 'play') { pointerDrawing = false; MQ.Sound.click(); confirmReset(); } });
+  tapButton('btn-pause', () => { if (state === 'play') { MQ.Sound.click(); showPause(); } });
+  tapButton('btn-music', () => toggleMusic());
 
   // ---------- Win / results / adapting difficulty ----------
   function win() {
@@ -708,21 +803,27 @@
         </div>
         <div class="next">${move.text}</div>
         ${newHero ? `<div class="next">🎉 New hero unlocked: ${newHero.emoji} ${newHero.name}! Pick it in the portal.</div>` : ''}
-        <div class="press">Press <span class="key">return</span> for the next puzzle</div>
+        <div class="press keys-only">Press <span class="key">return</span> for the next puzzle</div>
+        <button class="btn go touch-only" type="button">Next ▶</button>
       </div>`,
       (k) => { if (k === 'Enter' || k === ' ') nextPuzzle(); }
     );
-    overlay.querySelector('.card').addEventListener('click', nextPuzzle);
+    overlay.querySelector('.card').addEventListener('click', armed(nextPuzzle));
   }
 
   function nextPuzzle() {
+    if (state !== 'result') return;
     newPuzzle();
     showIntro();
   }
 
   // ---------- Overlays ----------
   let overlayKeys = null;
+  let overlayAt = 0;
+  // Taps on a card only count after it has been up a moment (no accidental double actions).
+  const armed = (fn) => () => { if (performance.now() - overlayAt > 450) fn(); };
   function showOverlay(html, keys) {
+    overlayAt = performance.now();
     overlay.innerHTML = html;
     overlay.hidden = false;
     overlayKeys = keys;
@@ -751,12 +852,14 @@
         <p>Connect each pair of dots.<br>The numbers on your path must <b>add up</b> to the dot!</p>
         ${first || g.level <= 2 ? demo : ''}
         <div class="targets">${targets}</div>
-        ${first ? `<p class="hint">Move with the arrows. Press <span class="key">space</span> on a dot, then walk to its twin.<br>Step back to undo. Stuck? Press <span class="key">H</span> for a hint.</p>` : ''}
-        <div class="press">Press <span class="key">return</span> to start</div>
+        ${first ? `<p class="hint keys-only">Move with the arrows. Press <span class="key">space</span> on a dot, then walk to its twin.<br>Step back to undo. Stuck? Press <span class="key">H</span> for a hint.</p>` : ''}
+        ${first ? `<p class="hint touch-only">👆 Put your finger on a dot and drag to its twin.<br>Slide back to undo. Stuck? Tap 💡 Hint.</p>` : ''}
+        <div class="press keys-only">Press <span class="key">return</span> to start</div>
+        <button class="btn go touch-only" type="button">Start ▶</button>
       </div>`,
       (k) => { if (k === 'Enter' || k === ' ') startPlay(); }
     );
-    overlay.querySelector('.card').addEventListener('click', startPlay);
+    overlay.querySelector('.card').addEventListener('click', armed(startPlay));
     const list = puzzle.pairs.map((pr) => pr.target);
     const spoken = list.length === 2 ? `${list[0]} and ${list[1]}` : `${list.slice(0, -1).join(', ')}, and ${list[list.length - 1]}`;
     const rules = g.played < 3 ? ' Draw a path from a dot to the dot with the same color. The numbers on your path must add up to the number on the dot.' : '';
@@ -773,7 +876,7 @@
     const pr = puzzle.pairs[0];
     cursor = pr.a;
     active = 0;
-    say(`The box is on the ${pr.color.emoji} ${pr.target}. Press space to start drawing!`);
+    say(kb(`The box is on the ${pr.color.emoji} ${pr.target}. Press space to start drawing!`, `👆 Put your finger on the ${pr.color.emoji} ${pr.target} and drag to the other ${pr.color.emoji} ${pr.target}!`));
     updateHud();
   }
 
@@ -781,6 +884,7 @@
     state = 'pause';
     drawing = -1;
     pointerDrawing = false;
+    fingerPt = null;
     let sel = 0;
     const items = [['▶ Keep playing', () => { hideOverlay(); state = 'play'; }], ['🏠 Back to the portal', () => { persist(); location.href = '../../index.html'; }]];
     const render = () => {
@@ -788,22 +892,24 @@
         <div class="card">
           <h2>⏸ Paused</h2>
           <div class="menu">${items.map((it, i) => `<button class="btn ${i === 0 ? '' : 'secondary'} ${i === sel ? 'sel' : ''}" data-i="${i}">${it[0]}</button>`).join('')}</div>
-          <div class="press">Use <span class="key">↑</span> <span class="key">↓</span> and <span class="key">return</span></div>
+          <div class="press keys-only">Use <span class="key">↑</span> <span class="key">↓</span> and <span class="key">return</span></div>
         </div>`,
         (k) => {
           if (k === 'ArrowUp' || k === 'ArrowDown') { sel = 1 - sel; MQ.Sound.click(); render(); }
           else if (k === 'Enter' || k === ' ') items[sel][1]();
           else if (k === 'Escape') items[0][1]();
         });
-      overlay.querySelectorAll('.menu .btn').forEach((b) => b.addEventListener('click', () => items[Number(b.dataset.i)][1]()));
+      overlay.querySelectorAll('.menu .btn').forEach((b) => b.addEventListener('click', armed(() => items[Number(b.dataset.i)][1]())));
     };
     render();
   }
 
   function confirmReset() {
-    if (paths.every((P) => P.length === 0)) { say('The board is already empty. Press space on a dot to start!'); return; }
+    if (paths.every((P) => P.length === 0)) { say(kb('The board is already empty. Press space on a dot to start!', 'The board is already empty. Drag from a dot to start!')); return; }
     state = 'confirm';
     drawing = -1;
+    pointerDrawing = false;
+    fingerPt = null;
     const back = () => { hideOverlay(); state = 'play'; };
     const yes = () => {
       hideOverlay();
@@ -812,7 +918,7 @@
       stats.resets++;
       active = 0;
       MQ.Sound.putBack();
-      say('Fresh start! Press space on a dot.');
+      say(kb('Fresh start! Press space on a dot.', 'Fresh start! Drag from a dot.'));
       updateHud();
     };
     showOverlay(`
@@ -820,14 +926,14 @@
         <h2>🔄 Start this puzzle over?</h2>
         <p>All the paths will be erased.</p>
         <div class="menu">
-          <button class="btn" data-a="yes">Yes, start over <span class="key">return</span></button>
-          <button class="btn secondary" data-a="no">No, keep my paths <span class="key">esc</span></button>
+          <button class="btn" data-a="yes">Yes, start over <span class="key keys-only">return</span></button>
+          <button class="btn secondary" data-a="no">No, keep my paths <span class="key keys-only">esc</span></button>
         </div>
       </div>`,
       (k) => { if (k === 'Enter' || k === ' ') yes(); else if (k === 'Escape' || k === 'r' || k === 'R') back(); }
     );
-    overlay.querySelector('[data-a=yes]').addEventListener('click', yes);
-    overlay.querySelector('[data-a=no]').addEventListener('click', back);
+    overlay.querySelector('[data-a=yes]').addEventListener('click', armed(yes));
+    overlay.querySelector('[data-a=no]').addEventListener('click', armed(back));
   }
 
   // ---------- Update loop ----------
@@ -854,6 +960,7 @@
     }
     if (grow) { grow.t += dt / STEP_TIME; if (grow.t >= 1) grow = null; }
     if (hintFlash) { hintFlash.t += dt; if (hintFlash.t > 2) hintFlash = null; }
+    if (ping) { ping.t += dt; if (ping.t > 1.8) ping = null; }
     if (wrongFlash) { wrongFlash.t += dt; if (wrongFlash.t > 1.2) wrongFlash = null; }
     for (const s of shimmers) s.t += dt;
     shimmers = shimmers.filter((s) => s.t < 1.4);
@@ -895,7 +1002,8 @@
     // Board tray
     const { x0, y0, cell } = geo;
     const size = cell * puzzle.n;
-    roundRect(x0 - 12, y0 - 12, size + 24, size + 24, 26);
+    const tp = Math.min(12, x0 - 3);
+    roundRect(x0 - tp, y0 - tp, size + tp * 2, size + tp * 2, 26);
     ctx.fillStyle = 'rgba(15,12,40,0.45)';
     ctx.fill();
   }
@@ -1081,6 +1189,7 @@
 
   function drawCursor() {
     if (state !== 'play' && state !== 'intro') return;
+    if (!keyMode) return; // touch: no keyboard box unless keys are used
     const { r, c } = rc(cursor);
     const cell = geo.cell;
     const x = geo.x0 + c * cell, y = geo.y0 + r * cell;
@@ -1109,23 +1218,41 @@
 
   function drawHeadBubble() {
     const p = drawing >= 0 ? drawing : -1;
-    if (p < 0 || paths[p].length < 2) return;
+    if (p < 0) return;
+    const finger = pointerDrawing && pointerKind !== 'mouse' && fingerPt;
+    if (paths[p].length < (finger ? 1 : 2)) return;
     const pr = puzzle.pairs[p];
     const s = sumOf(p);
     const pts = pathPoints(p);
     const hpt = pts[pts.length - 1];
     const cell = geo.cell;
-    const { r } = rc(head(p));
-    let bx = hpt.x + cell * 0.3;
-    const by = hpt.y + (r > 0 ? -cell * 0.5 : cell * 0.5);
+    const k = finger ? 1.35 : 1; // bigger on a phone
     const text = `${s}`;
     const sub = ` / ${pr.target}`;
-    ctx.font = `900 ${Math.round(cell * 0.26)}px ${UI_FONT}`;
+    const fBig = Math.round(cell * 0.26 * k), fSmall = Math.round(cell * 0.16 * k);
+    ctx.font = `900 ${fBig}px ${UI_FONT}`;
     const tw = ctx.measureText(text).width;
-    ctx.font = `800 ${Math.round(cell * 0.16)}px ${UI_FONT}`;
+    ctx.font = `800 ${fSmall}px ${UI_FONT}`;
     const sw = ctx.measureText(sub).width;
-    const w = tw + sw + cell * 0.24, h = cell * 0.36;
-    bx = Math.max(geo.x0 + w / 2 + 2, Math.min(geo.x0 + cell * puzzle.n - w / 2 - 2, bx));
+    const w = tw + sw + cell * 0.24 * k, h = cell * 0.36 * k;
+    let bx, by;
+    if (finger) {
+      // The finger hides the path head, so float the running sum well ABOVE the fingertip
+      // (or beside it when the finger is on the top row).
+      bx = fingerPt.x;
+      by = fingerPt.y - cell * 1.1;
+      if (by - h / 2 < 4) {
+        by = Math.max(h / 2 + 4, fingerPt.y - cell * 0.2);
+        bx = fingerPt.x + (fingerPt.x < W / 2 ? 1 : -1) * (cell * 0.95 + w / 2);
+      }
+      bx = Math.max(w / 2 + 4, Math.min(W - w / 2 - 4, bx));
+      by = Math.max(h / 2 + 4, Math.min(H - h / 2 - 4, by));
+    } else {
+      const { r } = rc(head(p));
+      bx = hpt.x + cell * 0.3;
+      by = hpt.y + (r > 0 ? -cell * 0.5 : cell * 0.5);
+      bx = Math.max(geo.x0 + w / 2 + 2, Math.min(geo.x0 + cell * puzzle.n - w / 2 - 2, bx));
+    }
     const fill = s === pr.target ? '#2e9e5b' : s > pr.target ? '#e8742a' : '#ffffff';
     const ink = s === pr.target || s > pr.target ? '#ffffff' : pr.color.dark;
     ctx.save();
@@ -1136,19 +1263,64 @@
     ctx.fillStyle = fill;
     ctx.fill();
     ctx.restore();
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 3 * k;
     ctx.strokeStyle = pr.color.c;
     ctx.stroke();
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = ink;
-    ctx.font = `900 ${Math.round(cell * 0.26)}px ${UI_FONT}`;
-    ctx.fillText(text, bx - w / 2 + cell * 0.12, by + 1);
-    ctx.font = `800 ${Math.round(cell * 0.16)}px ${UI_FONT}`;
+    ctx.font = `900 ${fBig}px ${UI_FONT}`;
+    ctx.fillText(text, bx - w / 2 + cell * 0.12 * k, by + 1);
+    ctx.font = `800 ${fSmall}px ${UI_FONT}`;
     ctx.globalAlpha = 0.8;
-    ctx.fillText(sub, bx - w / 2 + cell * 0.12 + tw, by + 2);
+    ctx.fillText(sub, bx - w / 2 + cell * 0.12 * k + tw, by + 2);
     ctx.globalAlpha = 1;
     ctx.textAlign = 'center';
+  }
+
+  // Rings on a dot after an empty cell was tapped ("paths start here").
+  function drawPing() {
+    if (!ping) return;
+    const { x, y } = cellCenter(ping.i);
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, 1 - ping.t / 1.8);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 5;
+    for (let k = 0; k < 2; k++) {
+      const rr = geo.cell * (0.42 + ((ping.t * 1.1 + k * 0.5) % 1) * 0.4);
+      ctx.beginPath(); ctx.arc(x, y, rr, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // First plays on a phone: a little hand shows "put your finger on the dot and drag".
+  function drawTouchHand() {
+    if (keyMode || state !== 'play' || drawing >= 0 || everDragged || g.played >= 3) return;
+    const p = puzzle.pairs.findIndex((_, q) => !isCorrect(q) && paths[q].length < 2);
+    if (p < 0) return;
+    const pr = puzzle.pairs[p];
+    const a = cellCenter(pr.sol[0]);
+    const b = cellCenter(pr.sol[1]);
+    const cyc = (time % 2.4) / 2.4;
+    const t = cyc < 0.3 ? 0 : cyc > 0.8 ? 1 : ease((cyc - 0.3) / 0.5);
+    const x = a.x + (b.x - a.x) * t, y = a.y + (b.y - a.y) * t;
+    const cell = geo.cell;
+    ctx.save();
+    ctx.globalAlpha = cyc > 0.9 ? (1 - cyc) * 10 : 1;
+    if (t > 0) { // a faint trail from the dot
+      ctx.strokeStyle = pr.color.c;
+      ctx.lineCap = 'round';
+      ctx.lineWidth = cell * 0.18;
+      ctx.globalAlpha *= 0.55;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(x, y); ctx.stroke();
+      ctx.globalAlpha /= 0.55;
+    }
+    ctx.font = `${Math.round(cell * 0.6)}px ${EMOJI_FONT}`;
+    ctx.fillStyle = '#000';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText('👆', x + cell * 0.05, y - cell * 0.02 + (cyc < 0.3 ? Math.sin(cyc * 20) * 3 : 0));
+    ctx.restore();
   }
 
   function drawHintFlash() {
@@ -1208,17 +1380,44 @@
     drawDots();
     drawCursor();
     drawHintFlash();
+    drawPing();
     drawEffects();
+    drawTouchHand();
     drawHeadBubble();
   }
 
   // ---------- Sizing (crisp on Retina screens) ----------
   let pixelScale = 1;
+  const root = document.documentElement;
+  const layoutEl = el('layout');
   function resize() {
-    const narrow = window.innerWidth <= 860;
-    const availW = narrow ? window.innerWidth - 24 : window.innerWidth - 300 - 20 - 36;
-    const availH = narrow ? window.innerHeight * 0.7 : window.innerHeight - 24;
-    const scale = Math.max(0.4, Math.min(availW / W, availH / H, 1.5));
+    const vw = window.innerWidth, vh = window.innerHeight;
+    compact = vw <= 860 || vh <= 560;
+    const land = compact && vw > vh;
+    root.classList.toggle('nf-compact', compact);
+    root.classList.toggle('nf-portrait', compact && !land);
+    root.classList.toggle('nf-land', land);
+    let scale;
+    if (!compact) {
+      const availW = window.innerWidth - 300 - 20 - 36;
+      const availH = window.innerHeight - 24;
+      scale = Math.max(0.4, Math.min(availW / W, availH / H, 1.5));
+    } else {
+      const cs = getComputedStyle(layoutEl);
+      const innerW = layoutEl.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      const innerH = layoutEl.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+      let size;
+      if (!land) {
+        const gap = parseFloat(cs.rowGap) || 6;
+        const others = ['.panel-top', '.pairs-box', '.sum-box', '.touchbar']
+          .reduce((a, sel) => a + document.querySelector(sel).offsetHeight, 0);
+        size = Math.min(innerW, innerH - others - gap * 5 - 54);
+      } else {
+        const gap = parseFloat(cs.columnGap) || 12;
+        size = Math.min(innerH, innerW - 250 - gap);
+      }
+      scale = Math.max(150, Math.floor(size)) / W;
+    }
     const dpr = window.devicePixelRatio || 1;
     stage.style.width = `${Math.round(W * scale)}px`;
     stage.style.height = `${Math.round(H * scale)}px`;
@@ -1228,8 +1427,11 @@
     canvas.height = Math.round(H * scale * dpr);
     pixelScale = scale * dpr;
     ctx.setTransform(pixelScale, 0, 0, pixelScale, 0, 0);
+    computeGeo();
   }
   window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', () => { resize(); setTimeout(resize, 300); });
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
 
   let last = performance.now();
   function frame(now) {
@@ -1255,13 +1457,17 @@
     get cursor() { return cursor; },
     get drawing() { return drawing; },
     get stats() { return Object.assign({}, stats); },
+    get geo() { return Object.assign({}, geo); },
+    get keyMode() { return keyMode; },
+    get layout() { return compact ? (root.classList.contains('nf-land') ? 'landscape' : 'portrait') : 'laptop'; },
     isCorrect: (p) => isCorrect(p),
     generate, configFor,
   };
 
-  resize();
   MQ.Music.play('canon');
   newPuzzle();
+  resize();
+  updateMusicBtn();
   showIntro();
   requestAnimationFrame(frame);
 })();
