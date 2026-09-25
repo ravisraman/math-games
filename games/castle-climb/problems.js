@@ -186,7 +186,7 @@
         return { tip: `${cap(tensWord(a / 10))} + ${tensWord(b / 10)} = how many tens?`, more: `${cap(tensWord(s / 10))} is ${s}.` };
       }
       if (s <= 10) {
-        if (s === 10) return { tip: `${a} and ${b} are ten-friends. What do ten-friends make?` };
+        if (s === 10) return { tip: `${a} and ${b} are ten-friends. What do ten-friends make?`, more: 'Ten-friends make 10.' };
         if (a === b) return { tip: `It's a double: ${a} + ${a}. Think of ${a} and ${a} fingers.` };
         const seq = [];
         for (let n = big + 1; n <= s; n++) seq.push(n);
@@ -198,13 +198,13 @@
         const need = 10 - big;
         return { tip: `Make a ten: ${big} + ${need} = 10, then ${small - need} more.` };
       }
-      if (big === 10) return { tip: `10 + ${small} is 1 ten and ${small} ones. What number is that?` };
+      if (big === 10) return { tip: `10 + ${small} is 1 ten and ${small} ones. What number is that?`, more: `It is ${s}.` };
       if (s <= 20) return { tip: `${big} is 1 ten and ${big - 10} ones. Add the ones: ${big - 10} + ${small} = ?`, more: `1 ten and ${big - 10 + small} ones is ${s}.` };
       if (small < 10) {
         const ones = big % 10;
-        if (ones + small < 10) return { tip: `Add the ones: ${ones} + ${small} = ? The tens stay the same.` };
+        if (ones + small < 10) return { tip: `Add the ones: ${ones} + ${small} = ? The tens stay the same.`, more: `${ones} + ${small} = ${ones + small}.` };
         const need = 10 - ones;
-        if (need === small) return { tip: `The ones make ten: ${ones} + ${small} = 10. So what is the next ten after ${big}?` };
+        if (need === small) return { tip: `The ones make ten: ${ones} + ${small} = 10. So what is the next ten after ${big}?`, more: `The next ten is ${s}.` };
         return { tip: `Make the next ten: ${big} + ${need} = ${big + need}, then ${small - need} more.` };
       }
       const tens = tensOf(a) + tensOf(b);
@@ -221,8 +221,8 @@
     }
     if (b < 10) {
       const ones = a % 10;
-      if (b <= ones) return { tip: `Take away from the ones: ${ones} − ${b} = ? The tens stay the same.` };
-      if (ones === 0) return { tip: `Break a ten: 10 − ${b} = ${10 - b}. Then what is ${a - 10} + ${10 - b}?` };
+      if (b <= ones) return { tip: `Take away from the ones: ${ones} − ${b} = ? The tens stay the same.`, more: `${ones} − ${b} = ${ones - b}.` };
+      if (ones === 0) return { tip: `Break a ten: 10 − ${b} = ${10 - b}. Then what is ${a - 10} + ${10 - b}?`, more: `${a - 10} + ${10 - b} = ${ans}.` };
       return { tip: `Back to a ten: ${a} − ${ones} = ${a - ones}, then take away ${b - ones} more.` };
     }
     const mid = a - tensOf(b);
@@ -479,7 +479,7 @@
     const ans = p.answer;
     const { pool, tens } = shapeFor(p, n);
     const lo = p.ops.includes('-') || p.blank >= 0 ? 0 : tens ? 10 : 1; // adding never makes 0
-    const hi = tens ? 140 : ans <= 10 ? 20 : ans <= 20 ? 30 : 120;
+    const hi = tens ? 120 : ans <= 10 ? 20 : ans <= 20 ? 30 : 109; // stay close to 2nd-grade numbers (to 100)
     for (let tries = 0; tries < 200; tries++) {
       const S = shuffle(pool.slice()).slice(0, n + 1).sort((x, y) => x - y);
       const role = S[Math.floor(Math.random() * S.length)];

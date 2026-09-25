@@ -259,7 +259,7 @@
     b.classList.add('pop', 'show');
     clearTimeout(say.timer); // phones show the panda's message as a short toast over the scene
     say.timer = setTimeout(() => b.classList.remove('show'), Math.min(7000, 2600 + text.length * 45));
-    if (speak) MQ.Voice.say(speakable(text), 'en-US', { interrupt: true });
+    if (speak) MQ.Voice.say(typeof speak === 'string' ? speak : speakable(text), 'en-US', { interrupt: true });
   }
 
   // ---------- Input ----------
@@ -356,7 +356,8 @@
         // Between two ledges: not under an answer yet, so he just bounces on the spot.
         MQ.Sound.nope();
         heroP.sq = -0.2;
-        say(touchUI() ? 'Tap an answer to jump to it! 👆' : 'Walk under an answer first — use ⬅ ➡', { speak: true });
+        say(touchUI() ? 'Tap an answer to jump to it! 👆' : 'Walk under an answer first — use ⬅ ➡',
+          { speak: touchUI() ? 'Tap an answer to jump to it!' : 'Walk under an answer first. Use the left and right arrows.' });
         return;
       }
     }
@@ -364,7 +365,8 @@
     if (!ledge.alive) {
       MQ.Sound.nope();
       heroP.sq = -0.2;
-      say(touchUI() ? 'That ledge fell down. Tap another one!' : 'That ledge fell down. Walk ⬅ ➡ to another one!', { speak: true });
+      say(touchUI() ? 'That ledge fell down. Tap another one!' : 'That ledge fell down. Walk ⬅ ➡ to another one!',
+        { speak: touchUI() ? 'That ledge fell down. Tap another one!' : 'That ledge fell down. Walk to another one!' });
       return;
     }
     state = 'jump';
@@ -652,14 +654,13 @@
   let overlayKeys = null;
   let overlayShownAt = 0;
   let overlayGuard = 0;
-  function showOverlay(html, keys, soft = false, guard = 1000) {
+  function showOverlay(html, keys, soft = false, guard = 1000, redraw = false) {
     overlay.innerHTML = html;
     overlay.hidden = false;
     overlay.classList.toggle('soft', soft);
     overlayKeys = keys;
-    const shownAt = performance.now();
-    overlayShownAt = shownAt;
-    overlayGuard = guard;
+    if (!redraw) { overlayShownAt = performance.now(); overlayGuard = guard; } // a menu redraw keeps the clock
+    const shownAt = overlayShownAt;
     const card = overlay.querySelector('[data-enter]');
     // A tap too soon after the card appears is a leftover from play — don't skip the card.
     if (card) card.addEventListener('click', () => { if (performance.now() - shownAt > Math.max(900, guard) && keys) keys('Enter'); });
@@ -718,6 +719,7 @@
       ['▶ Keep playing', () => { hideOverlay(); state = resumeState; }],
       ['🏠 Back to the portal', () => { persist(); location.href = '../../index.html'; }],
     ];
+    let drawn = false;
     const render = () => {
       showOverlay(`
         <div class="card">
@@ -729,7 +731,8 @@
           if (k === 'ArrowUp' || k === 'ArrowDown') { sel = 1 - sel; MQ.Sound.click(); render(); }
           else if (k === 'Enter' || k === ' ') items[sel][1]();
           else if (k === 'Escape') items[0][1]();
-        }, false, 250);
+        }, false, 250, drawn);
+      drawn = true;
       overlay.querySelectorAll('.menu .btn').forEach((b) => b.addEventListener('click', () => items[Number(b.dataset.i)][1]()));
     };
     render();
@@ -753,6 +756,7 @@
       ['🧗 Keep climbing', () => { hideOverlay(); state = resumeState; }],
       ['🏠 Go home', () => { persist(); location.href = '../../index.html'; }],
     ];
+    let drawn = false;
     const render = () => {
       showOverlay(`
         <div class="card leave">
@@ -765,7 +769,8 @@
           if (k === 'ArrowUp' || k === 'ArrowDown' || k === 'ArrowLeft' || k === 'ArrowRight') { sel = 1 - sel; MQ.Sound.click(); render(); }
           else if (k === 'Enter' || k === ' ') items[sel][1]();
           else if (k === 'Escape') items[0][1]();
-        }, false, 250);
+        }, false, 250, drawn);
+      drawn = true;
       overlay.querySelectorAll('.menu .btn').forEach((b) => b.addEventListener('click', () => items[Number(b.dataset.i)][1]()));
     };
     render();
