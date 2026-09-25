@@ -313,6 +313,11 @@
       });
     },
     click() { this.play((t, b) => Inst.wood(b, 84, t, 0.05, 0.35)); },
+    // Play any single note: MQ.Sound.note(72, 'bell', { delay: 0.1, dur: 1, vel: 0.15 }).
+    // Instruments: 'harp', 'bell', 'bass', 'timpani', 'wood'. MIDI 60 = middle C.
+    note(midi, inst = 'harp', { delay = 0, dur = 0.8, vel = 0.12 } = {}) {
+      this.play((t, b) => (Inst[inst] || Inst.harp)(b, midi, t + delay, dur, vel));
+    },
     star() { this.play((t, b) => { Inst.bell(b, 84, t, 1.2, 0.18); Inst.bell(b, 91, t + 0.1, 1.2, 0.12); Inst.bell(b, 96, t + 0.2, 1.4, 0.1); }); },
     // Quiz answers: a V–I cadence for right, a soft unresolved sigh for wrong.
     correct() {
@@ -371,7 +376,80 @@
     return { events: ev, length: melody.length * q + q * 2 };
   }
 
-  const SONGS = { prelude: buildPrelude, twinkle: buildTwinkle };
+  function buildCanon() {
+    // Johann Pachelbel — Canon in D: the ground bass with harp arpeggios, then the famous upper line.
+    const e = 0.32; // eighth note
+    const chords = [
+      [50, [62, 66, 69]], [45, [61, 64, 69]], [47, [62, 66, 71]], [42, [61, 66, 69]],
+      [43, [62, 67, 71]], [38, [62, 66, 69]], [43, [62, 67, 71]], [45, [61, 64, 69]],
+    ];
+    const upper = [78, 76, 74, 73, 71, 69, 71, 73];
+    const ev = [];
+    for (let cycle = 0; cycle < 3; cycle++) {
+      chords.forEach(([root, tri], ci) => {
+        const t0 = (cycle * 8 + ci) * 4 * e;
+        ev.push({ t: t0, m: root, d: 4 * e + 0.3, v: 0.13, i: 'bass' });
+        [tri[0], tri[1], tri[2], tri[1]].forEach((m, k) => ev.push({ t: t0 + k * e, m, d: 1.4, v: 0.07, i: 'harp' }));
+        if (cycle >= 1) ev.push({ t: t0, m: upper[ci], d: 2.2, v: 0.1, i: 'bell' });
+        if (cycle === 2) ev.push({ t: t0 + 2 * e, m: upper[ci] - 3 - (ci % 2), d: 1.4, v: 0.06, i: 'bell' });
+      });
+    }
+    return { events: ev, length: 3 * 8 * 4 * e };
+  }
+
+  function buildMinuet() {
+    // Minuet in G (from the Notebook for Anna Magdalena Bach), music box over a soft bass.
+    const q = 0.52;
+    const A = [
+      [[74, 1], [67, 0.5], [69, 0.5], [71, 0.5], [72, 0.5]], [[74, 1], [67, 1], [67, 1]],
+      [[76, 1], [72, 0.5], [74, 0.5], [76, 0.5], [78, 0.5]], [[79, 1], [67, 1], [67, 1]],
+      [[72, 1], [74, 0.5], [72, 0.5], [71, 0.5], [69, 0.5]], [[71, 1], [72, 0.5], [71, 0.5], [69, 0.5], [67, 0.5]],
+    ];
+    const bars = [...A, [[66, 1], [67, 0.5], [69, 0.5], [71, 0.5], [67, 0.5]], [[69, 3]],
+      ...A, [[69, 1], [71, 0.5], [69, 0.5], [67, 0.5], [66, 0.5]], [[67, 3]]];
+    const bass = [55, 59, 60, 59, 57, 55, 50, 50, 55, 59, 60, 59, 57, 55, 50, 43];
+    const ev = [];
+    bars.forEach((bar, bi) => {
+      let beat = bi * 3;
+      ev.push({ t: beat * q, m: bass[bi], d: 3 * q, v: 0.12, i: 'bass' });
+      ev.push({ t: (beat + 1) * q, m: bass[bi] + 7, d: 1.2, v: 0.045, i: 'harp' });
+      ev.push({ t: (beat + 2) * q, m: bass[bi] + 12, d: 1.2, v: 0.045, i: 'harp' });
+      bar.forEach(([m, len]) => { ev.push({ t: beat * q, m, d: Math.max(0.9, len * q * 1.6), v: 0.11, i: 'bell' }); beat += len; });
+    });
+    return { events: ev, length: bars.length * 3 * q + q };
+  }
+
+  function buildElise() {
+    // Ludwig van Beethoven — "Für Elise" (opening theme), gently on harp.
+    const s = 0.23; // sixteenth note
+    const ev = [];
+    let at = 0;
+    const run = (notes, v = 0.1) => notes.forEach((m) => { ev.push({ t: at * s, m, d: 1.3, v, i: 'harp' }); at++; });
+    const bar = (top, lh, rh) => {
+      ev.push({ t: at * s, m: top, d: 1.6, v: 0.1, i: 'harp' });
+      lh.forEach((m, k) => ev.push({ t: (at + k) * s, m, d: 1.2, v: 0.06, i: k === 0 ? 'bass' : 'harp' }));
+      at += 3;
+      run(rh);
+    };
+    const AM = [45, 52, 57], EM = [40, 52, 56];
+    run([76, 75]);
+    const phrase = (end) => {
+      run([76, 75, 76, 71, 74, 72]);
+      bar(69, AM, [60, 64, 69]);
+      bar(71, EM, [64, 68, 71]);
+      bar(72, AM, [64, 76, 75]);
+      run([76, 75, 76, 71, 74, 72]);
+      bar(69, AM, [60, 64, 69]);
+      bar(71, EM, end);
+    };
+    phrase([64, 72, 71]);
+    ev.push({ t: at * s, m: 69, d: 2.2, v: 0.1, i: 'harp' });
+    AM.forEach((m, k) => ev.push({ t: (at + k) * s, m, d: 1.6, v: 0.06, i: k === 0 ? 'bass' : 'harp' }));
+    at += 8;
+    return { events: ev, length: at * s };
+  }
+
+  const SONGS = { prelude: buildPrelude, twinkle: buildTwinkle, canon: buildCanon, minuet: buildMinuet, elise: buildElise };
 
   const Music = {
     enabled: true,
