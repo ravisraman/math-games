@@ -721,14 +721,14 @@
       if (!on) this._stopNow();
       else this._startIfWanted();
     },
-    duck(seconds) {
+    duck(seconds, amount = 0.25) {
       if (!Audio.ctx || !this.song) return;
       const g = Audio.music.gain;
       const t = Audio.ctx.currentTime;
       g.cancelScheduledValues(t);
       g.setValueAtTime(g.value, t);
-      g.linearRampToValueAtTime(this.level * 0.25, t + 0.3);
-      g.setValueAtTime(this.level * 0.25, t + seconds);
+      g.linearRampToValueAtTime(this.level * amount, t + 0.3);
+      g.setValueAtTime(this.level * amount, t + seconds);
       g.linearRampToValueAtTime(this.level, t + seconds + 1.5);
     },
     _startIfWanted() {
@@ -802,9 +802,21 @@
   });
 
   // ---------- Read aloud (helps early readers) ----------
-  // Uses the best voice installed on the device: Premium / Enhanced voices first, well-known
-  // natural voices next, and never the novelty or robotic ones. Speech runs one phrase at a time.
+  // First choice: a natural neural voice from the family's Cloudflare Worker (Deepgram Aura-2 for
+  // English, MeloTTS for Chinese), played through Web Audio. Each phrase is fetched once and reused.
+  // Fallback (offline, slow network, or turned off): the best voice installed on the device —
+  // Premium / Enhanced voices first, never the novelty or robotic ones.
+  const NATURAL_VOICES = [
+    { id: 'luna', label: 'Luna (warm, friendly)' },
+    { id: 'thalia', label: 'Thalia (bright, cheerful)' },
+    { id: 'athena', label: 'Athena (calm, clear)' },
+    { id: 'helena', label: 'Helena (gentle)' },
+    { id: 'aurora', label: 'Aurora (soft)' },
+    { id: 'apollo', label: 'Apollo (friendly man)' },
+    { id: 'orion', label: 'Orion (calm man)' },
+  ];
   const ROBOT_VOICES = /Albert|Bad News|Bahh|Bells|Boing|Bubbles|Cellos|Good News|Jester|Organ|Superstar|Trinoids|Whisper|Wobble|Zarvox|Fred|Junior|Ralph|Kathy|Grandma|Grandpa|Eddy|Flo|Reed|Rocko|Sandy|Shelley|Deranged|Hysterical/i;
+  const CLOUD_WAIT_MS = 5000; // how long to wait for the natural voice before using the device voice
 
   function voiceScore(v, lang) {
     const want = lang.toLowerCase();
@@ -824,7 +836,15 @@
 
   const Voice = {
     enabled: true,
-    chosen: {},
+    natural: true,
+    speaker: 'luna',
+    voices: NATURAL_VOICES,
+    queue: [],
+    busy: false,
+    gen: 0,
+    source: null,
+    cancelWait: null,
+    cache: new Map(),
 
     voiceFor(lang) {
       try {
@@ -842,8 +862,17 @@
 
     // Name of the voice that will be used, for the grown-ups corner.
     describe(lang = 'en-US') {
+      if (this.cloudOk()) {
+        if (lang.toLowerCase().startsWith('zh')) return 'Natural Chinese voice (MeloTTS)';
+        const v = NATURAL_VOICES.find((x) => x.id === this.speaker);
+        return `Natural voice: ${v ? v.label : this.speaker}`;
+      }
       const v = this.voiceFor(lang);
       return v ? v.name : 'default voice';
+    },
+
+    cloudOk() {
+      return this.natural && /^https?:$/.test(location.protocol) && navigator.onLine !== false;
     },
 
     clean(text) {
@@ -856,20 +885,106 @@
 
     say(text, lang = 'en-US', { interrupt = false } = {}) {
       text = this.clean(text);
-      if (!this.enabled || !text || !('speechSynthesis' in window)) return;
+      if (!this.enabled || !text) return;
+      if (interrupt) this.stop();
+      const item = { text, lang, gen: this.gen };
+      if (this.cloudOk()) item.audio = this.fetchAudio(text, lang);
+      this.queue.push(item);
+      this.pump();
+    },
+
+    fetchAudio(text, lang) {
+      const zh = lang.toLowerCase().startsWith('zh');
+      const key = `${zh ? 'zh' : 'en'}|${zh ? '' : this.speaker}|${text}`;
+      if (this.cache.has(key)) return this.cache.get(key);
+      const url = `${CLOUD}/tts?lang=${zh ? 'zh' : 'en'}&voice=${encodeURIComponent(this.speaker)}&text=${encodeURIComponent(text)}`;
+      const p = fetch(url)
+        .then((r) => { if (!r.ok) throw new Error('tts ' + r.status); return r.arrayBuffer(); })
+        .then((buf) => {
+          const ctx = Audio.init();
+          if (!ctx) throw new Error('no audio');
+          return new Promise((resolve, reject) => {
+            const r = ctx.decodeAudioData(buf, resolve, reject);
+            if (r && r.catch) r.catch(() => {}); // newer browsers also return a promise
+          });
+        })
+        .catch(() => { this.cache.delete(key); return null; });
+      this.cache.set(key, p);
+      if (this.cache.size > 150) this.cache.delete(this.cache.keys().next().value);
+      return p;
+    },
+
+    async pump() {
+      if (this.busy) return;
+      const item = this.queue.shift();
+      if (!item) return;
+      this.busy = true;
       try {
-        if (interrupt) speechSynthesis.cancel();
-        const u = new SpeechSynthesisUtterance(text);
-        u.lang = lang;
-        u.rate = lang.startsWith('zh') ? 0.9 : 1.0;
-        u.pitch = 1.05;
-        const v = this.voiceFor(lang);
-        if (v) u.voice = v;
-        speechSynthesis.speak(u);
+        let buffer = null;
+        if (item.audio && item.gen === this.gen) {
+          const cancelled = new Promise((resolve) => { this.cancelWait = resolve; });
+          buffer = await Promise.race([item.audio, cancelled, new Promise((r) => setTimeout(() => r(null), CLOUD_WAIT_MS))]);
+          this.cancelWait = null;
+        }
+        if (item.gen === this.gen) {
+          const ctx = Audio.ctx;
+          if (buffer && ctx) {
+            if (ctx.state === 'suspended') { try { await ctx.resume(); } catch (e) { /* ignore */ } }
+          }
+          if (buffer && ctx && ctx.state === 'running') await this.playBuffer(buffer);
+          else await this.systemSay(item.text, item.lang);
+        }
       } catch (e) { /* ignore */ }
+      this.busy = false;
+      this.pump();
+    },
+
+    playBuffer(buffer) {
+      return new Promise((resolve) => {
+        const ctx = Audio.ctx;
+        const src = ctx.createBufferSource();
+        src.buffer = buffer;
+        src.connect(Audio.master);
+        let finished = false;
+        const done = () => { if (finished) return; finished = true; clearTimeout(guard); if (this.source === src) this.source = null; resolve(); };
+        const guard = setTimeout(done, buffer.duration * 1000 + 1500);
+        src.onended = done;
+        this.source = src;
+        this.sourceDone = done;
+        Music.duck(buffer.duration + 0.2, 0.4);
+        src.start();
+      });
+    },
+
+    systemSay(text, lang) {
+      return new Promise((resolve) => {
+        if (!('speechSynthesis' in window)) { resolve(); return; }
+        try {
+          const u = new SpeechSynthesisUtterance(text);
+          u.lang = lang;
+          u.rate = lang.startsWith('zh') ? 0.9 : 1.0;
+          u.pitch = 1.05;
+          const v = this.voiceFor(lang);
+          if (v) u.voice = v;
+          const done = () => { clearTimeout(t); resolve(); };
+          const t = setTimeout(done, 1500 + text.length * 120);
+          u.onend = done;
+          u.onerror = done;
+          speechSynthesis.speak(u);
+        } catch (e) { resolve(); }
+      });
     },
 
     stop() {
+      this.gen++;
+      this.queue = [];
+      if (this.cancelWait) { this.cancelWait(null); this.cancelWait = null; }
+      if (this.source) {
+        const done = this.sourceDone;
+        try { this.source.stop(); } catch (e) { /* ignore */ }
+        this.source = null;
+        if (done) done();
+      }
       try { speechSynthesis.cancel(); } catch (e) { /* ignore */ }
     },
   };
@@ -881,6 +996,8 @@
   function applySettings(settings) {
     Sound.enabled = !!settings.sound;
     Voice.enabled = !!settings.voice;
+    Voice.natural = settings.naturalVoice !== false;
+    if (NATURAL_VOICES.some((v) => v.id === settings.voiceName)) Voice.speaker = settings.voiceName;
     Music.setEnabled(settings.music !== false);
   }
 

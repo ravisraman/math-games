@@ -299,11 +299,13 @@
         <div class="gp-card sync-card" id="gp-sync">${syncCard()}</div>
         <div class="gp-card">
           <h3>🔊 Read-aloud voice</h3>
-          <p>This device is using: <b>${MQ.escapeHtml(MQ.Voice.describe('en-US'))}</b> (English) · <b>${MQ.escapeHtml(MQ.Voice.describe('zh-CN'))}</b> (Chinese)</p>
+          <label><input type="checkbox" id="gp-natural" ${data.settings.naturalVoice !== false ? 'checked' : ''}> Natural voice (needs internet; falls back to the device voice when offline)</label>
+          <label>Voice
+            <select id="gp-voice-name">${MQ.Voice.voices.map((v) => `<option value="${v.id}" ${(data.settings.voiceName || 'luna') === v.id ? 'selected' : ''}>${MQ.escapeHtml(v.label)}</option>`).join('')}</select>
+          </label>
           <div class="row" style="justify-content:flex-start"><button class="btn secondary small" id="gp-voice-test">▶ Test voice</button></div>
-          <p class="muted">For a much more natural voice, download a free <b>Premium</b> voice once on each device — the games pick it automatically:<br>
-          <b>iPhone:</b> Settings → Accessibility → Spoken Content → Voices → English → <b>Ava (Premium)</b> or <b>Zoe (Premium)</b>; and Chinese (China mainland) → <b>Lili (Premium)</b>.<br>
-          <b>Mac:</b> System Settings → Accessibility → Spoken Content → System voice → Manage Voices… → the same voices.</p>
+          <p class="muted" id="gp-voice-now">Now using: ${MQ.escapeHtml(MQ.Voice.describe('en-US'))}</p>
+          <p class="muted">Only the sentences the games read aloud are sent to your Cloudflare voice service — never names or progress. Offline, the device voice is used; for the best offline voice download a free <b>Premium</b> voice (iPhone: Settings → Accessibility → Spoken Content → Voices → English → <b>Ava (Premium)</b>; Chinese → <b>Lili (Premium)</b>. Mac: System Settings → Accessibility → Spoken Content → System voice → Manage Voices…).</p>
         </div>
         <div class="gp-card">
           <h3>Save & backup</h3>
@@ -327,8 +329,21 @@
     setting('gp-voice', 'voice');
     setting('gp-chinese', 'chinese');
     $('gp-voice-test').addEventListener('click', () => {
-      MQ.Voice.say(`Hi ${data.player.name || 'there'}! Let's collect exactly forty-seven cents.`, 'en-US', { interrupt: true });
+      MQ.Voice.say("Hi there! Let's collect exactly forty-seven cents.", 'en-US', { interrupt: true });
       MQ.Voice.say('太棒了！四十七分。', 'zh-CN');
+    });
+    $('gp-natural').addEventListener('change', (e) => {
+      data.settings.naturalVoice = e.target.checked;
+      MQ.applySettings(data.settings);
+      MQ.save(data);
+      $('gp-voice-now').textContent = 'Now using: ' + MQ.Voice.describe('en-US');
+    });
+    $('gp-voice-name').addEventListener('change', (e) => {
+      data.settings.voiceName = e.target.value;
+      MQ.applySettings(data.settings);
+      MQ.save(data);
+      $('gp-voice-now').textContent = 'Now using: ' + MQ.Voice.describe('en-US');
+      MQ.Voice.say("Hi there! This is my voice.", 'en-US', { interrupt: true });
     });
     wireSync();
     $('gp-name').addEventListener('input', (e) => { data.player.name = e.target.value.trim(); MQ.save(data); render(); });

@@ -286,3 +286,5 @@ footer { padding-bottom: max(30px, calc(env(safe-area-inset-bottom) + 12px)); }
 .sync-join input { font: inherit; font-size: 18px; letter-spacing: 1px; text-transform: uppercase; padding: 6px 10px; border-radius: 10px; border: 2px solid var(--line); width: 12em; max-width: 100%; }
 .sync-msg { min-height: 1.2em; font-weight: 700; color: var(--good); }
 .sync-msg.bad, .sync-err { color: var(--bad); }
+
+.gp-card select { font: inherit; font-size: 16px; padding: 4px 8px; border-radius: 8px; border: 2px solid var(--line); background: #fff; }

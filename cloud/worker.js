@@ -5,6 +5,8 @@
    Bindings: SYNC (KV namespace "math-quest-sync"), AI (Workers AI). */
 
 const SITE = 'https://ravisraman.github.io';
+const NEW_PHRASES_PER_MINUTE = 40; // per visitor address, to protect the free Workers AI allowance
+const recent = new Map(); // ip -> timestamps of recently generated phrases (per Worker instance)
 const VOICES = ['luna', 'thalia', 'athena', 'helena', 'apollo', 'arcas', 'aurora', 'cora', 'hera', 'orion'];
 
 function corsFor(req) {
@@ -50,29 +52,53 @@ async function toBytes(result) {
   throw new Error('unexpected TTS result');
 }
 
-async function tts(url, env, headers) {
+function audioType(bytes) {
+  // MeloTTS returns WAV, Aura-2 returns MP3.
+  return bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 ? 'audio/wav' : 'audio/mpeg';
+}
+
+function allowNewPhrase(ip) {
+  const now = Date.now();
+  const list = (recent.get(ip) || []).filter((t) => now - t < 60000);
+  if (list.length >= NEW_PHRASES_PER_MINUTE) { recent.set(ip, list); return false; }
+  list.push(now);
+  recent.set(ip, list);
+  if (recent.size > 500) recent.delete(recent.keys().next().value);
+  return true;
+}
+
+async function tts(url, env, headers, req, ctx) {
   const text = (url.searchParams.get('text') || '').trim().slice(0, 300);
   const lang = url.searchParams.get('lang') === 'zh' ? 'zh' : 'en';
   const voice = VOICES.includes(url.searchParams.get('voice')) ? url.searchParams.get('voice') : 'luna';
   if (!text) return json({ error: 'no text' }, 400, headers);
 
   const key = 'tts:' + (await sha256(`${lang}|${lang === 'en' ? voice : 'melo'}|${text}`));
-  const audioHeaders = { ...headers, 'Content-Type': 'audio/mpeg', 'Cache-Control': 'public, max-age=31536000, immutable' };
+  const audioHeaders = (bytes) => ({ ...headers, 'Content-Type': audioType(bytes), 'Cache-Control': 'public, max-age=31536000, immutable' });
   const cached = await env.SYNC.get(key, 'arrayBuffer');
-  if (cached) return new Response(cached, { headers: { ...audioHeaders, 'X-Cache': 'hit' } });
+  if (cached) return new Response(cached, { headers: { ...audioHeaders(new Uint8Array(cached)), 'X-Cache': 'hit' } });
+  if (!allowNewPhrase(req.headers.get('CF-Connecting-IP') || 'unknown')) return json({ error: 'slow down' }, 429, headers);
 
+  // The voice models occasionally return a transient "internal server error"; try up to 3 times.
   let bytes;
-  if (lang === 'zh') {
-    bytes = await toBytes(await env.AI.run('@cf/myshell-ai/melotts', { prompt: text, lang: 'zh' }));
-  } else {
-    bytes = await toBytes(await env.AI.run('@cf/deepgram/aura-2-en', { text, speaker: voice, encoding: 'mp3' }));
+  for (let attempt = 0; ; attempt++) {
+    try {
+      bytes = lang === 'zh'
+        ? await toBytes(await env.AI.run('@cf/myshell-ai/melotts', { prompt: text, lang: 'zh' }))
+        : await toBytes(await env.AI.run('@cf/deepgram/aura-2-en', { text, speaker: voice, encoding: 'mp3' }));
+      break;
+    } catch (e) {
+      if (attempt >= 2) throw e;
+      await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
+    }
   }
-  await env.SYNC.put(key, bytes, { expirationTtl: 60 * 60 * 24 * 180 });
-  return new Response(bytes, { headers: { ...audioHeaders, 'X-Cache': 'miss' } });
+  // Keep the phrase for next time; if storage is unavailable (e.g. the daily free write limit), still answer.
+  ctx.waitUntil(env.SYNC.put(key, bytes, { expirationTtl: 60 * 60 * 24 * 180 }).catch(() => {}));
+  return new Response(bytes, { headers: { ...audioHeaders(bytes), 'X-Cache': 'miss' } });
 }
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const url = new URL(req.url);
     const cors = corsFor(req);
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors.headers });
@@ -97,7 +123,7 @@ export default {
       }
       if (url.pathname === '/tts' && req.method === 'GET') {
         if (!cors.ok) return json({ error: 'forbidden' }, 403, cors.headers);
-        return await tts(url, env, cors.headers);
+        return await tts(url, env, cors.headers, req, ctx);
       }
       if (url.pathname === '/') return json({ ok: true, service: 'math-quest' }, 200, cors.headers);
       return json({ error: 'not found' }, 404, cors.headers);
