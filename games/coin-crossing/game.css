@@ -152,6 +152,10 @@ body {
 }
 .choice.sel { border-color: var(--sky); background: #eaf5ff; transform: translateY(-3px); }
 .choice.right { border-color: var(--good); background: #e6f7ec; }
+.choices.waiting .choice { animation: choice-bob 1.8s ease-in-out infinite; } /* all together — no favourite */
+@keyframes choice-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) { .choices.waiting .choice { animation: none; } }
+.card .press .nudge { color: #b3471a; font-weight: 800; }
 .choice.wrong { border-color: var(--bad); background: #fdecec; }
 .explain { font-size: 18px; margin-top: 12px; font-weight: 700; }
 .explain.good { color: var(--good); }

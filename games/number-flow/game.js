@@ -40,23 +40,25 @@
   const UI_FONT = getComputedStyle(document.body).fontFamily;
 
   // ---------- Level design ----------
-  // n = board size, pairs = colored pairs, lo/hi = number range, len = numbers inside each
-  // intended path, maxT = biggest target, tens = occasional big numbers (10 / 20).
+  // n = board size, pairs = colored pairs, lo/hi = number range, len = numbers on each intended
+  // path (it is always a detour, so a little longer than the straight way), minT/maxT = target
+  // range, tens = occasional big numbers (10 / 20), cap = most routes (of about the intended
+  // length) allowed to make the target, near = how close a "tempting" wrong route must get.
   const LEVELS = [
     null,
-    { n: 4, pairs: 2, lo: 1, hi: 5, len: [2, 2], minT: 5, maxT: 10 }, // 1
-    { n: 4, pairs: 2, lo: 1, hi: 5, len: [2, 3], minT: 6, maxT: 12 }, // 2
-    { n: 5, pairs: 2, lo: 1, hi: 6, len: [2, 3], minT: 7, maxT: 15 }, // 3
-    { n: 5, pairs: 3, lo: 1, hi: 6, len: [2, 3], minT: 7, maxT: 16 }, // 4
-    { n: 5, pairs: 3, lo: 1, hi: 8, len: [2, 4], minT: 8, maxT: 20 }, // 5
-    { n: 6, pairs: 3, lo: 1, hi: 9, len: [3, 4], minT: 10, maxT: 24 }, // 6
-    { n: 6, pairs: 4, lo: 1, hi: 9, len: [3, 4], minT: 10, maxT: 26 }, // 7
-    { n: 6, pairs: 4, lo: 2, hi: 9, len: [3, 5], minT: 12, maxT: 30 }, // 8
-    { n: 6, pairs: 4, lo: 2, hi: 9, len: [3, 5], minT: 14, maxT: 36, tens: [10], tenP: 0.2 }, // 9
-    { n: 7, pairs: 4, lo: 2, hi: 9, len: [3, 5], minT: 16, maxT: 40, tens: [10], tenP: 0.25 }, // 10
-    { n: 7, pairs: 5, lo: 2, hi: 9, len: [3, 5], minT: 18, maxT: 45, tens: [10], tenP: 0.25 }, // 11
-    { n: 7, pairs: 5, lo: 2, hi: 9, len: [3, 6], minT: 20, maxT: 50, tens: [10, 20], tenP: 0.25 }, // 12
-    { n: 7, pairs: 5, lo: 3, hi: 9, len: [4, 6], minT: 24, maxT: 60, tens: [10, 20], tenP: 0.3 }, // 13+
+    { n: 4, pairs: 2, lo: 1, hi: 4, len: [3, 3], minT: 6, maxT: 11, cap: 2, near: 2 }, // 1
+    { n: 4, pairs: 2, lo: 1, hi: 5, len: [3, 4], minT: 7, maxT: 14, cap: 2, near: 2 }, // 2
+    { n: 5, pairs: 2, lo: 1, hi: 6, len: [3, 5], minT: 8, maxT: 18, cap: 2, near: 2 }, // 3
+    { n: 5, pairs: 3, lo: 1, hi: 6, len: [3, 4], minT: 8, maxT: 20, cap: 2, near: 2 }, // 4
+    { n: 5, pairs: 3, lo: 1, hi: 8, len: [3, 5], minT: 10, maxT: 24, cap: 3, near: 3 }, // 5
+    { n: 6, pairs: 3, lo: 1, hi: 9, len: [3, 6], minT: 12, maxT: 28, cap: 3, near: 3 }, // 6
+    { n: 6, pairs: 4, lo: 1, hi: 9, len: [3, 5], minT: 12, maxT: 30, cap: 3, near: 3 }, // 7
+    { n: 6, pairs: 4, lo: 2, hi: 9, len: [3, 6], minT: 14, maxT: 34, cap: 3, near: 3 }, // 8
+    { n: 6, pairs: 4, lo: 2, hi: 9, len: [3, 6], minT: 16, maxT: 40, tens: [10], tenP: 0.2, cap: 3, near: 3 }, // 9
+    { n: 7, pairs: 4, lo: 2, hi: 9, len: [4, 6], minT: 18, maxT: 45, tens: [10], tenP: 0.25, cap: 3, near: 3 }, // 10
+    { n: 7, pairs: 5, lo: 2, hi: 9, len: [4, 6], minT: 20, maxT: 50, tens: [10], tenP: 0.25, cap: 3, near: 3 }, // 11
+    { n: 7, pairs: 5, lo: 2, hi: 9, len: [4, 7], minT: 22, maxT: 56, tens: [10, 20], tenP: 0.25, cap: 3, near: 3 }, // 12
+    { n: 7, pairs: 5, lo: 3, hi: 9, len: [4, 7], minT: 26, maxT: 66, tens: [10, 20], tenP: 0.3, cap: 3, near: 3 }, // 13+
   ];
   function configFor(L) {
     return Object.assign({}, LEVELS[Math.max(1, Math.min(LEVELS.length - 1, L))]);
@@ -74,11 +76,19 @@
   }
   const ease = (t) => 1 - Math.pow(1 - t, 3);
   const zh = (n) => (data.settings.chinese ? MQ.zhNumber(n) : '');
+  const clock = () => (window.performance ? performance.now() : Date.now());
 
   // ---------- Puzzle generator ----------
-  // Lay down K snake-like random walks that never touch themselves or each other's cells.
-  // Walk ends become the dots, the walk's inside numbers set the target; every other cell
-  // gets a distractor number. So the intended walks are always a solution.
+  // The math has to matter: the straight / shortest way between two dots must NEVER make the
+  // target, so a child can't just connect the dots and ignore the numbers.
+  //  1. Lay down K snake-like random walks that never touch themselves or each other's cells.
+  //     Each walk is a DETOUR: its ends are closer together than the walk is long.
+  //  2. Walk ends become the dots, the walk's inside numbers set the target, every other cell
+  //     gets a distractor number. So the intended walks are always a solution (and the hint).
+  //  3. Check every pair with a small search of the routes a child could draw (up to a couple
+  //     of cells longer than the intended one): no shortest route may hit the target, only a
+  //     few routes may hit it at all, and some wrong route should come close (a tempting
+  //     "almost!"). Nudge single numbers until that holds; keep the best board found.
   function neighbors(i, n) {
     const r = Math.floor(i / n), c = i % n, out = [];
     if (r > 0) out.push(i - n);
@@ -87,6 +97,7 @@
     if (c < n - 1) out.push(i + 1);
     return out;
   }
+  const manhattan = (a, b, n) => Math.abs(Math.floor(a / n) - Math.floor(b / n)) + Math.abs((a % n) - (b % n));
 
   function randomWalk(n, used, cells) {
     const free = [];
@@ -103,13 +114,17 @@
         return neighbors(j, n).every((k) => k === head || !inWalk.has(k));
       });
       if (!opts.length) return null;
-      // Mostly keep going straight, sometimes turn — makes nicer shapes.
+      // Turn fairly often, so the walk bends back into a detour.
       let next = opts.find((j) => j - head === dir);
-      if (next === undefined || Math.random() < 0.45) next = pick(opts);
+      if (next === undefined || Math.random() < 0.6) next = pick(opts);
       dir = next - head;
       walk.push(next);
       inWalk.add(next);
     }
+    // A detour: the dots are at least 2 steps apart (the short way has a number on it) and
+    // the walk is longer than the straight / L-shaped way.
+    const d = manhattan(walk[0], walk[walk.length - 1], n);
+    if (d < 2 || d > walk.length - 3) return null;
     return walk;
   }
 
@@ -118,45 +133,169 @@
     return rand(cfg.lo, cfg.hi);
   }
 
+  // Steps from every cell to dot b, going around the other pairs' dots (-1 = can't get there).
+  function distTo(n, cells, pr, p) {
+    const dist = new Int16Array(n * n).fill(-1);
+    dist[pr.b] = 0;
+    const q = [pr.b];
+    for (let h = 0; h < q.length; h++) {
+      const i = q[h];
+      if (i === pr.a) continue;
+      for (const j of neighbors(i, n)) {
+        if (dist[j] >= 0 || (cells[j].pair >= 0 && j !== pr.a)) continue;
+        dist[j] = dist[i] + 1;
+        q.push(j);
+      }
+    }
+    return dist;
+  }
+
+  // Search the routes a child could draw from dot a to dot b (up to 2 steps longer than the
+  // intended one — in a grid every route to b has the same odd/even length). Numbers are all
+  // positive, so a route whose sum is already too big is dropped straight away.
+  function checkPair(n, cells, pr, dist, cfg, nbr) {
+    const want = pr.target, tol = cfg.near;
+    const intendedE = pr.sol.length - 1;
+    const shortest = dist[pr.a];
+    const maxE = intendedE + 2;
+    const on = new Uint8Array(n * n);
+    const res = { shortest, hits: 0, spHit: false, near: false, spNear: false, bad: null };
+    const route = [];
+    on[pr.a] = 1;
+    (function dfs(i, e, sum) {
+      if (res.hits > 12) return; // plenty to know it's too easy
+      const nb = nbr[i];
+      for (let k = 0; k < nb.length; k++) {
+        const j = nb[k];
+        if (on[j] || dist[j] < 0) continue;
+        if (j === pr.b) {
+          const diff = Math.abs(sum - want);
+          if (diff === 0) {
+            res.hits++;
+            if (e + 1 === shortest) res.spHit = true;
+            if (e + 1 === shortest || (res.hits > cfg.cap && !res.bad)) res.bad = route.slice();
+          } else if (diff <= tol && e + 1 <= intendedE) {
+            res.near = true;
+            if (e + 1 === shortest) res.spNear = true;
+          }
+          continue;
+        }
+        if (cells[j].pair >= 0) continue;
+        const s2 = sum + cells[j].num;
+        if (s2 > want + tol || e + 1 + dist[j] > maxE) continue;
+        on[j] = 1; route.push(j);
+        dfs(j, e + 1, s2);
+        on[j] = 0; route.pop();
+      }
+    })(pr.a, 0, 0);
+    return res;
+  }
+
+  function costOf(checks, cfg) {
+    let c = 0;
+    for (const r of checks) {
+      if (r.spHit) c += 1000;
+      if (r.hits > cfg.cap) c += 10 * (r.hits - cfg.cap);
+      if (!r.near) c += 3;
+      if (!r.spNear) c += 1; // nicest: the straight way is only a little off
+    }
+    return c;
+  }
+
+  // One candidate board (walks + numbers), or null if the walks didn't fit.
+  function layout(cfg) {
+    const n = cfg.n;
+    const used = new Uint8Array(n * n);
+    const walks = [];
+    for (let k = 0; k < cfg.pairs; k++) {
+      let walk = null;
+      for (let t = 0; t < 60 && !walk; t++) walk = randomWalk(n, used, rand(cfg.len[0], cfg.len[1]) + 2);
+      if (!walk) return null;
+      walk.forEach((i) => { used[i] = 1; });
+      walks.push(walk);
+    }
+    const cells = Array.from({ length: n * n }, () => ({ num: null, pair: -1 }));
+    const pairs = walks.map((walk, p) => {
+      cells[walk[0]].pair = p;
+      cells[walk[walk.length - 1]].pair = p;
+      return { a: walk[0], b: walk[walk.length - 1], sol: walk, target: 0, color: COLORS[p] };
+    });
+    // With every dot placed, the intended route must still be a real detour.
+    const dists = pairs.map((pr, p) => distTo(n, cells, pr, p));
+    for (let p = 0; p < pairs.length; p++) {
+      const sp = dists[p][pairs[p].a];
+      if (sp < 2 || pairs[p].sol.length - 1 < sp + 2) return null;
+    }
+    const owner = new Int8Array(n * n).fill(-1);
+    pairs.forEach((pr, p) => {
+      const inner = pr.sol.slice(1, -1);
+      inner.forEach((i) => { owner[i] = p; });
+      let nums;
+      for (let t = 0; t < 60; t++) {
+        nums = inner.map(() => randNum(cfg));
+        const s = nums.reduce((a, b) => a + b, 0);
+        if (s <= cfg.maxT && (s >= cfg.minT || t > 40)) break;
+      }
+      let s = nums.reduce((a, b) => a + b, 0);
+      while (s > cfg.maxT) { // safety: shrink the biggest numbers until it fits
+        const j = nums.indexOf(Math.max(...nums));
+        const cut = Math.min(nums[j] - 1, s - cfg.maxT);
+        nums[j] -= cut; s -= cut;
+      }
+      inner.forEach((i, k) => { cells[i].num = nums[k]; });
+      pr.target = s;
+    });
+    cells.forEach((cell) => { if (cell.pair < 0 && cell.num === null) cell.num = randNum(cfg); });
+    return { cells, pairs, dists, owner };
+  }
+
   function generate(L, forcePairs) {
     const cfg = configFor(L);
     if (forcePairs) cfg.pairs = forcePairs;
     const n = cfg.n;
-    for (let attempt = 0; attempt < 400; attempt++) {
-      const used = new Uint8Array(n * n);
-      const walks = [];
-      for (let k = 0; k < cfg.pairs; k++) {
-        let walk = null;
-        for (let t = 0; t < 40 && !walk; t++) walk = randomWalk(n, used, rand(cfg.len[0], cfg.len[1]) + 2);
-        if (!walk) break;
-        walk.forEach((i) => { used[i] = 1; });
-        walks.push(walk);
+    const nbr = Array.from({ length: n * n }, (_, i) => neighbors(i, n));
+    const t0 = clock();
+    let best = null, bestCost = Infinity;
+    for (let attempt = 0; attempt < 600; attempt++) {
+      if (best && clock() - t0 > 40) break; // good enough — don't keep him waiting
+      const cand = layout(cfg);
+      if (!cand) continue;
+      const { cells, pairs, dists, owner } = cand;
+      const check = (p) => checkPair(n, cells, pairs[p], dists[p], cfg, nbr);
+      let checks = pairs.map((_, p) => check(p));
+      let cost = costOf(checks, cfg);
+      // Nudge one number at a time; keep the change unless it makes things worse.
+      for (let it = 0; it < 70 && cost > 0; it++) {
+        const worst = checks.find((r) => r.bad) || null;
+        let i;
+        if (worst && Math.random() < 0.8) {
+          // Break a route that makes the target too easily: change a number on it.
+          i = pick(worst.bad);
+        } else {
+          do { i = rand(0, n * n - 1); } while (cells[i].pair >= 0);
+        }
+        const old = cells[i].num;
+        const v = randNum(cfg);
+        if (v === old) continue;
+        const q = owner[i];
+        if (q >= 0) { // on an intended path: its target moves too, and must stay in range
+          const t = pairs[q].target + v - old;
+          if (t < cfg.minT || t > cfg.maxT) continue;
+          pairs[q].target = t;
+        }
+        cells[i].num = v;
+        const next = pairs.map((_, p) => check(p));
+        const c = costOf(next, cfg);
+        if (c <= cost) { cost = c; checks = next; }
+        else { cells[i].num = old; if (q >= 0) pairs[q].target -= v - old; }
       }
-      if (walks.length < cfg.pairs) continue;
-
-      const cells = Array.from({ length: n * n }, () => ({ num: null, pair: -1 }));
-      const pairs = walks.map((walk, p) => {
-        const inner = walk.slice(1, -1);
-        let nums;
-        for (let t = 0; t < 60; t++) {
-          nums = inner.map(() => randNum(cfg));
-          const s = nums.reduce((a, b) => a + b, 0);
-          if (s <= cfg.maxT && (s >= cfg.minT || t > 40)) break;
-        }
-        let s = nums.reduce((a, b) => a + b, 0);
-        while (s > cfg.maxT) { // safety: shrink the biggest numbers until it fits
-          const j = nums.indexOf(Math.max(...nums));
-          const cut = Math.min(nums[j] - 1, s - cfg.maxT);
-          nums[j] -= cut; s -= cut;
-        }
-        inner.forEach((i, k) => { cells[i].num = nums[k]; });
-        cells[walk[0]].pair = p;
-        cells[walk[walk.length - 1]].pair = p;
-        return { a: walk[0], b: walk[walk.length - 1], sol: walk, target: s, color: COLORS[p] };
-      });
-      cells.forEach((cell) => { if (cell.pair < 0 && cell.num === null) cell.num = randNum(cfg); });
-      return { n, cfg, cells, pairs, level: L };
+      if (cost < bestCost) {
+        bestCost = cost;
+        best = { n, cfg, cells: cells.map((c) => ({ num: c.num, pair: c.pair })), pairs: pairs.map((pr) => Object.assign({}, pr)), level: L, cost };
+      }
+      if (cost === 0) break;
     }
+    if (best) return best;
     return generate(L, (forcePairs || cfg.pairs) - 1); // board too crowded: one fewer pair
   }
 

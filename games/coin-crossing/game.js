@@ -508,7 +508,18 @@
     player.t = 1;
     player.inv = 1.4;
     queuedMove = null;
-    say(stats.bonks >= 3 ? `${MQ.CHEER.zh} (${MQ.CHEER.py}) Wait for a gap, then hop! Your coins are safe.` : 'Bonk! Back to the start — your coins are safe.');
+    // A car hit starts the level over: every collected coin flies back to its spot.
+    const lost = pouch.length;
+    while (pouch.length) {
+      const coin = pouch.pop();
+      coin.taken = false;
+      coin.warned = false;
+      coin.fly = { t: 0, x, y: y - 20 };
+    }
+    for (const c of coins) c.warned = false;
+    updateHud();
+    const again = lost ? 'Bonk! The coins went back — start over from the bottom.' : 'Bonk! Back to the start.';
+    say(stats.bonks >= 3 ? `${MQ.CHEER.zh} (${MQ.CHEER.py}) Wait for a gap, then hop! ${again}` : again);
   }
 
   // ---------- Win / results / adapting difficulty ----------
@@ -722,8 +733,11 @@
     const q = QUIZ[type].make(Math.max(1, g.level - 1));
     if (!q.options.includes(q.answer)) q.options[0] = q.answer;
     while (q.options.length < 3) q.options.push(String(Number(q.options[q.options.length - 1]) + 2));
-    let sel = 1;
+    // Nothing is pre-selected: every choice looks the same until the child picks one
+    // (no "leading the witness"). The first arrow press picks from the middle outwards.
+    let sel = -1;
     let done = false;
+    let nudge = false;
 
     const render = (result) => {
       const choices = q.options.map((o, i) => {
@@ -732,6 +746,9 @@
         else if (i === sel) cls += ' sel';
         return `<button class="${cls}" data-i="${i}">${MQ.escapeHtml(o)}</button>`;
       }).join('');
+      const keyHint = result ? 'Press <span class="key">return</span> to keep going'
+        : sel < 0 ? `<span class="${nudge ? 'nudge' : ''}">${nudge ? 'Pick an answer first — use' : 'Pick one! Use'} <span class="key">←</span> <span class="key">→</span></span>`
+        : 'Pick with <span class="key">←</span> <span class="key">→</span> then press <span class="key">return</span>';
       const feedback = !result ? '' : result === 'right'
         ? `<div class="explain good">✔ Correct! <span class="zh">对了!</span> +1 ⭐</div>`
         : `<div class="explain bad">The answer is ${MQ.escapeHtml(q.answer)}. ${MQ.escapeHtml(q.explain)}</div>`;
@@ -740,9 +757,9 @@
           <div class="hint">🐼 Bonus question · ${QUIZ[type].label}</div>
           ${q.visual ? `<div class="quiz-visual">${q.visual}</div>` : ''}
           <div class="quiz-q">${MQ.escapeHtml(q.q)}</div>
-          <div class="choices">${choices}</div>
+          <div class="choices${!result && sel < 0 ? ' waiting' : ''}">${choices}</div>
           ${feedback}
-          <div class="press keys-only">${result ? 'Press <span class="key">return</span> to keep going' : 'Pick with <span class="key">←</span> <span class="key">→</span> then press <span class="key">return</span>'}</div>
+          <div class="press keys-only">${keyHint}</div>
           ${result ? '<button class="btn go touch-only" data-go>Next level ▶</button>' : '<div class="press touch-only">Tap your answer 👆</div>'}
         </div>`, keys);
       overlay.querySelectorAll('.choice').forEach((b) => b.addEventListener('click', () => {
@@ -767,9 +784,14 @@
 
     const keys = (k) => {
       if (done) { if (k === 'Enter' || k === ' ') nextLevel(); return; }
-      if (k === 'ArrowLeft') { sel = Math.max(0, sel - 1); MQ.Sound.click(); render(); }
-      else if (k === 'ArrowRight') { sel = Math.min(q.options.length - 1, sel + 1); MQ.Sound.click(); render(); }
-      else if (k === 'Enter' || k === ' ') answer();
+      const n = q.options.length;
+      const mid = (n - 1) / 2; // first press steps out of the middle toward the arrow's side
+      if (k === 'ArrowLeft') { sel = sel < 0 ? Math.ceil(mid) - 1 : Math.max(0, sel - 1); nudge = false; MQ.Sound.click(); render(); }
+      else if (k === 'ArrowRight') { sel = sel < 0 ? Math.floor(mid) + 1 : Math.min(n - 1, sel + 1); nudge = false; MQ.Sound.click(); render(); }
+      else if (k === 'Enter' || k === ' ') {
+        if (sel < 0) { nudge = true; MQ.Sound.click(); render(); return; }
+        answer();
+      }
     };
 
     render();

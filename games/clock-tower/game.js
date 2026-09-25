@@ -224,11 +224,11 @@
       // At 1-minute steps keep the long hand within a few numbers of the answer (less key-holding).
       if (c.step === 1) {
         const s1 = T(rand(1, 12), minOf(target) + pick([-1, 1]) * rand(4, 20));
-        if (Math.abs(shortest(s1, target)) >= 20) return s1;
+        if (Math.abs(shortest(s1, target)) >= 20 && hourOf(s1) !== hourOf(target)) return s1;
         continue;
       }
       const s = c.L <= 2 ? T(rand(1, 12), pick([0, 0, 30])) : T(rand(1, 12), rand(0, 11) * 5);
-      if (Math.abs(shortest(s, target)) >= 20 && minOf(s) !== minOf(target)) return s;
+      if (Math.abs(shortest(s, target)) >= 20 && minOf(s) !== minOf(target) && hourOf(s) !== hourOf(target)) return s;
     }
     return norm(target + 200);
   }
@@ -570,7 +570,7 @@
   let phase = 'ask';   // ask | feedback
   let q = null;
   let qid = 0;
-  let sel = 0;
+  let sel = -1; // -1 = nothing picked yet (no answer is highlighted until he chooses)
   let floor = 0;
   let floorMissed = false;
   let firstTry = 0;
@@ -675,7 +675,7 @@
     phase = 'ask';
     hintUntil = 0;
     labelFlashUntil = 0;
-    sel = q.options ? (q.options.length === 3 ? 1 : 0) : 0;
+    sel = -1; // never pre-select an answer — don't lead the witness
     if (q.mode === 'set') {
       clockT = nearest(q.start);
       moveClock(clockT, 0.7);
@@ -724,6 +724,7 @@
       q.theirs = clockT;
       right = norm(clockT) === norm(q.target);
     } else {
+      if (sel < 0) { nudgePick(); return; }
       q.picked = sel;
       right = sel === q.answerIdx;
     }
@@ -1003,10 +1004,22 @@
     }
     if (e.repeat) return;
     const n = q.options.length;
-    if (k === 'ArrowLeft' || k === 'ArrowUp') { sel = Math.max(0, sel - 1); MQ.Sound.click(); }
-    else if (k === 'ArrowRight' || k === 'ArrowDown') { sel = Math.min(n - 1, sel + 1); MQ.Sound.click(); }
+    const mid = (n - 1) / 2; // nothing picked yet: the first press steps out of the middle toward that side
+    if (k === 'ArrowLeft' || k === 'ArrowUp') { sel = sel < 0 ? Math.ceil(mid) - 1 : Math.max(0, sel - 1); MQ.Sound.click(); }
+    else if (k === 'ArrowRight' || k === 'ArrowDown') { sel = sel < 0 ? Math.floor(mid) + 1 : Math.min(n - 1, sel + 1); MQ.Sound.click(); }
     else if (k === 'Enter' || k === ' ') submit();
   }
+
+  // Return pressed before any answer was chosen: a friendly nudge, nothing else.
+  function nudgePick() {
+    MQ.Sound.click();
+    const text = MQ.isTouch ? '👆 Tap an answer first!' : 'Pick an answer first — use ← →';
+    say(text);
+    if (isPhone()) toast(text, 2.5);
+  }
+
+  // All the answer buttons bob together (same height, same time) until one is picked.
+  const waitBob = () => (phase === 'ask' && sel < 0 ? 2 + 2 * Math.sin(time * 3.2) : 0);
 
   function toggleMusic() {
     data.settings.music = data.settings.music === false;
@@ -2057,6 +2070,8 @@
         else { ink = '#9a93a8'; }
       } else if (i === sel) {
         fill = '#eaf5ff'; edge = '#4aa8ff'; lift = 4;
+      } else {
+        lift = waitBob();
       }
       button(x, by, w, bh, { fill, edge, lift });
       ctx.fillStyle = ink;
@@ -2660,6 +2675,8 @@
         fill = '#eaf5ff'; edge = '#4aa8ff'; lift = -4;
       } else if (usedKeys && i === sel) {
         fill = '#eaf5ff'; edge = '#4aa8ff'; lift = 3;
+      } else if (!(usedKeys && sel >= 0)) {
+        lift = waitBob();
       }
       button(r.x, r.y, r.w, r.h, { fill, edge, lift });
       const sub = q.subs ? q.subs[i] : null;
@@ -2772,9 +2789,12 @@
       ctx.restore();
     } else {
       if (coachSeen.choice || !rects) return;
-      const r = rects[Math.floor(rects.length / 2)];
-      if (mode === 'portrait') { x = r.x + r.w / 2 + 10; y = r.y + r.h * 0.62 + Math.sin(time * 5) * 6; }
-      else { x = r.x + r.w - 34; y = r.y + r.h * 0.3 + Math.sin(time * 5) * 5; }
+      // Glide evenly back and forth over ALL the choices (never resting on one of them).
+      const a = rects[0];
+      const b = rects[rects.length - 1];
+      const u = Math.abs(((time / 3.2) % 2) - 1); // triangle wave 0..1..0
+      if (mode === 'portrait') { x = a.x + a.w / 2 + 10 + u * (b.x - a.x); y = a.y + a.h * 0.62; }
+      else { x = a.x + a.w - 34; y = a.y + a.h * 0.3 + u * (b.y - a.y); }
     }
     ctx.save();
     ctx.globalAlpha = alpha;
