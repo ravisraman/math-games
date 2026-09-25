@@ -237,9 +237,9 @@ html.lay-landscape .layout {
 html.lay-landscape .stage { flex: 1 1 0; min-width: 0; border-radius: 14px; }
 html.lay-landscape .panel { width: 196px; max-width: none; max-height: none; gap: 6px; min-height: 0; }
 html.lay-landscape .problem-box, html.lay-landscape .controls { display: none; }
-html.lay-landscape .panel-top { gap: 6px; }
+html.lay-landscape .panel-top { gap: 4px; }
 html.lay-landscape .home { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; padding: 0; font-size: 22px; flex: none; }
-html.lay-landscape .level-pill, html.lay-landscape .star-pill { font-size: 16px; padding: 6px 10px; white-space: nowrap; }
+html.lay-landscape .level-pill, html.lay-landscape .star-pill { font-size: 15px; padding: 6px 8px; white-space: nowrap; }
 html.lay-landscape .floor-box { padding: 5px 8px; border-radius: 14px; flex: none; }
 html.lay-landscape .floor-box .label { font-size: 14px; }
 html.lay-landscape .floor-box .tally { display: none; }
