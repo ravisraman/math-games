@@ -145,7 +145,7 @@ body { background: linear-gradient(180deg, #ffe3c4 0%, #fff4e4 55%, #ffeede 100%
 .card .praise small { display: block; font-size: 15px; color: var(--muted); font-weight: 600; }
 .card .stats { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px 18px; font-size: 17px; color: var(--muted); font-weight: 700; margin-top: 8px; }
 .card .next { margin-top: 10px; font-size: 18px; font-weight: 800; }
-.card .next.up { color: var(--good); }
+.card .next.up, .card .next.up2 { color: var(--good); }
 .card .press { margin-top: 16px; font-size: 16px; color: var(--muted); }
 
 .menu { display: grid; gap: 10px; margin-top: 14px; }

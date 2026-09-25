@@ -122,6 +122,7 @@
   let problemClock = 0;
   let idleClock = 0;
   let nudged = false;
+  let nudgeAt = 12;
   let time = 0;
   let lastSaveAt = 0;
   let nextRocket = 0;
@@ -205,6 +206,7 @@
     const values = P.shuffle([p.answer, ...P.distractors(p, lanes - 1)]);
     p.ledges = values.map((v) => ({ v, alive: true, crack: 0 }));
     p.firstAttempt = true;
+    p.hinted = false; // used the 💡 hint: the floor still counts, but not as first try / speedy
     p.tries = 0;
     p.floor = floor + 1;
     p.done = false;
@@ -279,7 +281,9 @@
       else if (k === 'ArrowDown') readAgain();
       return;
     }
-    if (overlayKeys && !e.repeat) overlayKeys(k, e);
+    // Keys pressed right after a card appears are leftovers from play (mashing space at the
+    // top) — ignore them so he really sees his stars and the next level's card.
+    if (overlayKeys && !e.repeat && performance.now() - overlayShownAt > overlayGuard) overlayKeys(k, e);
   });
 
   function toggleMusic() {
@@ -294,12 +298,20 @@
     if (!problem || state === 'climb') return;
     hintOn = !hintOn;
     if (hintOn) {
-      const text = problem.firstAttempt ? problem.tip : problem.full;
+      if (!problem.done && problem.firstAttempt && !problem.hinted) {
+        problem.hinted = true;
+        // A fact he needed help with comes back later in this climb for another go.
+        if (!stats.retry.some((r) => r.key === problem.key) && floor < FLOORS - 2) stats.retry.push({ key: problem.key, due: Math.min(floor + 3, FLOORS - 1) });
+      }
+      const text = hintText();
       say(`💡 ${text}`);
       MQ.Voice.say(speakable(text), 'en-US', { interrupt: true });
     }
     syncBar();
   }
+
+  // The hint never gives the answer away: only the strategy, until he has missed twice.
+  function hintText() { return problem.tries >= 2 ? problem.full : problem.tip; }
 
   function readAgain() {
     if (!problem) return;
@@ -337,17 +349,22 @@
     idleClock = 0;
     if (heroP.t < 1) { queuedJump = true; return; }
     if (heroP.lane === HOME) {
-      // Not under an answer yet: he just bounces on the spot.
-      MQ.Sound.nope();
-      heroP.sq = -0.2;
-      say(touchUI() ? 'Tap an answer to jump to it! 👆' : 'Walk under an answer first — use ⬅ ➡');
-      return;
+      if (lanes % 2 === 1) {
+        // Odd number of ledges: the doorway is right under the middle one, so ⬆ jumps to it.
+        heroP.lane = heroP.from = (lanes - 1) / 2;
+      } else {
+        // Between two ledges: not under an answer yet, so he just bounces on the spot.
+        MQ.Sound.nope();
+        heroP.sq = -0.2;
+        say(touchUI() ? 'Tap an answer to jump to it! 👆' : 'Walk under an answer first — use ⬅ ➡', { speak: true });
+        return;
+      }
     }
     const ledge = problem.ledges[heroP.lane];
     if (!ledge.alive) {
       MQ.Sound.nope();
       heroP.sq = -0.2;
-      say(touchUI() ? 'That ledge fell down. Tap another one!' : 'That ledge fell down. Walk ⬅ ➡ to another one!');
+      say(touchUI() ? 'That ledge fell down. Tap another one!' : 'That ledge fell down. Walk ⬅ ➡ to another one!', { speak: true });
       return;
     }
     state = 'jump';
@@ -359,7 +376,7 @@
     if (problem.firstAttempt) {
       const s = skillEntry(problem.skill);
       s.tries++;
-      if (problem.right) s.right++;
+      if (problem.right && !problem.hinted) s.right++;
     }
     MQ.Sound.hop(floor + 1);
     dust(laneX(heroP.lane), sy(floor), 5);
@@ -451,7 +468,7 @@
 
   function onRight() {
     const p = problem;
-    const first = p.firstAttempt;
+    const first = p.firstAttempt && !p.hinted;
     const secs = problemClock;
     stats.times.push(secs);
     if (first) {
@@ -473,7 +490,7 @@
     const praise = MQ.pick(MQ.PRAISE);
     floater(x, y - 95, data.settings.chinese ? praise.zh : praise.en, '#e0452e');
     if (speedy) floater(Math.min(W - 80, TX1 + 20), 140, '✨ Speedy!', '#d99a00', 0.1);
-    say(`${first ? praise.zh + ' ' + praise.en : 'You got it! 对了!'} ${p.solved}`);
+    say(`${first ? praise.zh + ' ' + praise.en : 'You got it! 对了!'} ${p.solved}${p.hinted && p.firstAttempt ? ' 💡' : ''}`);
     if (data.settings.chinese) MQ.Voice.say(first ? praise.zh : '对了!', 'zh-CN', { interrupt: true });
     else MQ.Voice.say(first ? praise.en : 'You got it!', 'en-US', { interrupt: true });
 
@@ -502,8 +519,15 @@
     shakeT = 0;
     MQ.Sound.wrong();
     hintOn = true;
-    say(`Oops, not that one. ${p.full}`);
-    MQ.Voice.say(`Not quite. ${speakable(p.full)}`, 'en-US', { interrupt: true });
+    if (p.tries >= 2) {
+      // Second miss on this floor: now show the whole solution.
+      say(`Oops! Here's how: ${p.full}`);
+      MQ.Voice.say(`Not quite. Here's how. ${speakable(p.full)}`, 'en-US', { interrupt: true });
+    } else {
+      // First miss: only the strategy — he works it out and tries again.
+      say(`Oops, not that one. 💡 ${p.tip} Try again!`);
+      MQ.Voice.say(`Not quite. ${speakable(p.tip)} Try again!`, 'en-US', { interrupt: true });
+    }
   }
 
   function trimMissed() {
@@ -555,11 +579,12 @@
     return 1;
   }
 
-  function adapt(firstTry) {
+  function adapt(firstTry, perfect) {
     const before = g.level;
     g.played++;
     if (firstTry >= 9) {
-      g.level = Math.min(MAX_LEVEL, g.level + 1);
+      // A perfect climb (10/10 first try, 8+ speedy) jumps up two levels.
+      g.level = Math.max(g.level, Math.min(MAX_LEVEL, g.level + (perfect ? 2 : 1)));
       g.struggles = 0;
     } else if (firstTry <= 5) {
       g.struggles++;
@@ -568,6 +593,7 @@
       g.struggles = 0;
     }
     g.maxLevel = Math.max(g.maxLevel || 1, g.level);
+    if (g.level > before + 1) return { text: `🚀 Perfect climb! You skip ahead two levels! Next: ${P.levelInfo(g.level).name}.`, kind: 'up2' };
     if (g.level > before) return { text: `⬆ Level up! Next: ${P.levelInfo(g.level).name}.`, kind: 'up' };
     if (g.level < before) return { text: "Let's practice some easier ones, then climb back up! 💪", kind: 'down' };
     if (before === MAX_LEVEL && firstTry >= 9) return { text: "You're a tower master! 🏆", kind: 'up' };
@@ -586,7 +612,7 @@
     const heroesBefore = MQ.unlockedHeroes(data.stars).length;
     data.stars += stars;
     const newHero = MQ.unlockedHeroes(data.stars).slice(heroesBefore)[0];
-    const move = adapt(s.firstTry);
+    const move = adapt(s.firstTry, s.firstTry === FLOORS && s.speedy >= 8);
     persist();
     state = 'result';
     updateHud();
@@ -611,21 +637,32 @@
         <div class="press keys-only">Press <span class="key">return</span> to climb again</div>
         <button class="btn go touch-only">Climb again ▶</button>
       </div>`,
-      (k) => { if (k === 'Enter' || k === ' ') { MQ.Sound.click(); newClimb(); showIntro(); } }, true
+      (k) => { if (k === 'Enter') { MQ.Sound.click(); newClimb(); showIntro(); } }, true, 1500
     );
+    // Say the result out loud too (he may not read it yet).
+    const starWord = ['', 'One star', 'Two stars', 'Three stars'][stars];
+    const spoken = move.kind === 'up2' ? `${starWord}! Perfect climb! You jump up two levels!`
+      : move.kind === 'up' ? (g.level > level ? `${starWord}! Level up!` : `${starWord}! You're a tower master!`)
+      : move.kind === 'down' ? `${starWord}! Let's practice some easier ones.`
+      : `${starWord}! Climb again to level up.`;
+    MQ.Voice.say(spoken, 'en-US', { interrupt: false });
   }
 
   // ---------- Overlays ----------
   let overlayKeys = null;
-  function showOverlay(html, keys, soft = false) {
+  let overlayShownAt = 0;
+  let overlayGuard = 0;
+  function showOverlay(html, keys, soft = false, guard = 1000) {
     overlay.innerHTML = html;
     overlay.hidden = false;
     overlay.classList.toggle('soft', soft);
     overlayKeys = keys;
     const shownAt = performance.now();
+    overlayShownAt = shownAt;
+    overlayGuard = guard;
     const card = overlay.querySelector('[data-enter]');
     // A tap too soon after the card appears is a leftover from play — don't skip the card.
-    if (card) card.addEventListener('click', () => { if (performance.now() - shownAt > 900 && keys) keys('Enter'); });
+    if (card) card.addEventListener('click', () => { if (performance.now() - shownAt > Math.max(900, guard) && keys) keys('Enter'); });
   }
   function hideOverlay() {
     overlay.hidden = true;
@@ -692,10 +729,47 @@
           if (k === 'ArrowUp' || k === 'ArrowDown') { sel = 1 - sel; MQ.Sound.click(); render(); }
           else if (k === 'Enter' || k === ' ') items[sel][1]();
           else if (k === 'Escape') items[0][1]();
-        });
+        }, false, 250);
       overlay.querySelectorAll('.menu .btn').forEach((b) => b.addEventListener('click', () => items[Number(b.dataset.i)][1]()));
     };
     render();
+  }
+
+  // 🏠 during a climb asks first, so one stray tap doesn't throw the climb away.
+  const homeLink = document.querySelector('.panel .home');
+  if (homeLink) {
+    homeLink.addEventListener('click', (e) => {
+      if (!PLAYING.has(state) && state !== 'pause') return; // intro / result card: just go home
+      e.preventDefault();
+      homeLink.blur();
+      MQ.Sound.click();
+      showLeave();
+    });
+  }
+  function showLeave() {
+    if (PLAYING.has(state)) { resumeState = state; state = 'pause'; }
+    let sel = 0;
+    const items = [
+      ['🧗 Keep climbing', () => { hideOverlay(); state = resumeState; }],
+      ['🏠 Go home', () => { persist(); location.href = '../../index.html'; }],
+    ];
+    const render = () => {
+      showOverlay(`
+        <div class="card leave">
+          <h2>🏠 Leave the climb?</h2>
+          <p class="hint">You are on floor ${floor} of 10.</p>
+          <div class="menu">${items.map((it, i) => `<button class="btn ${i === 0 ? '' : 'secondary'} ${i === sel ? 'sel' : ''}" data-i="${i}">${it[0]}</button>`).join('')}</div>
+          <div class="press keys-only">Use <span class="key">↑</span> <span class="key">↓</span> and <span class="key">return</span></div>
+        </div>`,
+        (k) => {
+          if (k === 'ArrowUp' || k === 'ArrowDown' || k === 'ArrowLeft' || k === 'ArrowRight') { sel = 1 - sel; MQ.Sound.click(); render(); }
+          else if (k === 'Enter' || k === ' ') items[sel][1]();
+          else if (k === 'Escape') items[0][1]();
+        }, false, 250);
+      overlay.querySelectorAll('.menu .btn').forEach((b) => b.addEventListener('click', () => items[Number(b.dataset.i)][1]()));
+    };
+    render();
+    MQ.Voice.say('Leave the climb? Keep climbing, or go home?', 'en-US', { interrupt: true });
   }
 
   // ---------- Effects ----------
@@ -748,9 +822,12 @@
     if (state === 'play' || state === 'jump') problemClock += dt;
     if (state === 'play') {
       idleClock += dt;
-      if (idleClock > 12 && !nudged) {
+      if (idleClock < 1) nudgeAt = 12; // any input resets the reminder clock
+      if (idleClock > nudgeAt) {
         nudged = true;
+        nudgeAt = idleClock + 25; // then again every 25 s
         say(touchUI() ? 'Tap the right answer to jump up! 👆' : 'Walk ⬅ ➡ under the right answer, then press ⬆ to jump!');
+        MQ.Voice.say(`${problem.speak} ${touchUI() ? 'Tap the right answer.' : 'Walk under the right answer and jump.'}`, 'en-US', { interrupt: true });
       }
     }
 
@@ -1378,20 +1455,23 @@
         ctx.lineTo(ax - d * 16, ay + 7); ctx.lineTo(ax, ay + 7); ctx.lineTo(ax, ay + 16); ctx.closePath();
         ctx.fill(); ctx.stroke();
       }
+      if (lanes % 2 === 1) upArrow(x, y - 92 + bob); // ...and he can jump to the ledge right above
       ctx.globalAlpha = 1;
     } else if (state === 'play' && heroP.lane >= 0 && idleClock > wait && problem && problem.ledges[heroP.lane].alive) {
       const a = clamp((idleClock - wait) * 2, 0, 1);
       ctx.globalAlpha = a;
-      const ay = y - 92 + Math.sin(time * 6) * 6;
-      ctx.fillStyle = '#fff';
-      ctx.strokeStyle = '#d99a00';
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.moveTo(x, ay - 18); ctx.lineTo(x + 16, ay); ctx.lineTo(x + 7, ay); ctx.lineTo(x + 7, ay + 16);
-      ctx.lineTo(x - 7, ay + 16); ctx.lineTo(x - 7, ay); ctx.lineTo(x - 16, ay); ctx.closePath();
-      ctx.fill(); ctx.stroke();
+      upArrow(x, y - 92 + Math.sin(time * 6) * 6);
       ctx.globalAlpha = 1;
     }
+  }
+  function upArrow(x, ay) {
+    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = '#d99a00';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(x, ay - 18); ctx.lineTo(x + 16, ay); ctx.lineTo(x + 7, ay); ctx.lineTo(x + 7, ay + 16);
+    ctx.lineTo(x - 7, ay + 16); ctx.lineTo(x - 7, ay); ctx.lineTo(x - 16, ay); ctx.closePath();
+    ctx.fill(); ctx.stroke();
   }
 
   function drawEffects() {
@@ -1498,7 +1578,7 @@
     const zhOn = data.settings.chinese;
     const title = top ? 'You reached the top!' : problem.text;
     const sub = top ? '你到顶了！' : problem.zh;
-    const ring = !top && problem.firstAttempt && !problem.done;
+    const ring = !top && problem.firstAttempt && !problem.hinted && !problem.done;
     // Fit the banner (and the ✨ ring beside it) on narrow phone screens.
     let fs = top ? 40 : 54;
     ctx.font = `900 ${fs}px ${UI_FONT}`;
@@ -1575,7 +1655,7 @@
 
   function drawHintScroll() {
     if (!hintOn || !problem || problem.done || state === 'top' || state === 'result') return;
-    const text = problem.firstAttempt ? `💡 ${problem.tip}` : problem.full;
+    const text = problem.tries >= 2 ? problem.full : `💡 ${problem.tip}`;
     const y = (data.settings.chinese ? 112 : 84) + 30;
     const maxW = Math.min(600, W - 80);
     const limit = state === 'play' || state === 'jump' ? sy(floor + 1) - 12 : H; // keep the ledges uncovered
@@ -3725,7 +3805,7 @@
       return {
         text: problem.text, key: problem.key, answer: problem.answer, skill: problem.skill,
         ledges: problem.ledges.map((l) => l.v), alive: problem.ledges.map((l) => l.alive),
-        firstAttempt: problem.firstAttempt, source: problem.source,
+        firstAttempt: problem.firstAttempt, source: problem.source, hinted: problem.hinted, tries: problem.tries, tip: problem.tip,
       };
     },
     get stats() { return stats; },

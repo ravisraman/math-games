@@ -233,15 +233,44 @@
     return norm(target + 200);
   }
 
-  // Three distinct choices: the answer, then classic mistakes, then fallbacks.
-  function buildOptions(correct, cands, fallback) {
-    const out = [correct];
+  // Three choices where the answer's place in size order (smallest / middle / biggest) is random,
+  // so "always pick the middle one" or "always pick the earliest" can't win. `cands` are classic
+  // mistakes (tried first), `fallback` near misses; all are numbers (minutes), shown with `show`.
+  // `key` is how big the choice *looks* (12:30 looks bigger than 1:30).
+  const looksClock = (t) => hourOf(t) * 60 + minOf(t);
+  function buildRanked(correct, cands, fallback, show, key) {
+    const ct = show(correct);
+    const ck = key(correct);
+    const seen = new Set([ct]);
+    const pool = [];
     for (const x of [...cands, ...fallback]) {
-      if (out.length >= 3) break;
-      if (x && !out.includes(x)) out.push(x);
+      const tx = show(x);
+      if (seen.has(tx) || key(x) === ck) continue;
+      seen.add(tx);
+      pool.push(x);
     }
-    shuffle(out);
-    return { options: out, answerIdx: out.indexOf(correct), answer: correct };
+    const lo = pool.filter((x) => key(x) < ck);
+    const hi = pool.filter((x) => key(x) > ck);
+    const ranks = [0, 1, 2].filter((r) => lo.length >= r && hi.length >= 2 - r);
+    const r = ranks.length ? pick(ranks) : Math.min(lo.length, 2);
+    // Keep the first classic mistake in when that rank allows it.
+    const take = (arr, n) => (n <= 0 ? [] : arr.slice(0, n));
+    const picks = [...take(lo, r), ...take(hi, 2 - r)];
+    for (const x of pool) { if (picks.length >= 2) break; if (!picks.includes(x)) picks.push(x); }
+    const out = shuffle([ct, ...picks.slice(0, 2).map(show)]);
+    return { options: out, answerIdx: out.indexOf(ct), answer: ct };
+  }
+
+  // Three options built from two features (e.g. hour and minutes) as a "corner":
+  // {(a1,b1), (a1,b2), (a2,b2)}. Every option has a different majority/minority pattern, and the
+  // answer takes a random corner, so "pick the odd one out" or "pick the one most like the others"
+  // is a coin toss. `roles` limits which corners the answer may take.
+  function cornerTriple(ans, a2, b2, roles = [0, 1, 2]) {
+    const [a, b] = ans;
+    const role = pick(roles);
+    if (role === 0) return [[a, b], [a, b2], [a2, b2]];   // answer = (a1,b1)
+    if (role === 1) return [[a, b], [a, b2], [a2, b]];    // answer = (a1,b2): others (a1,b1'),(a2',b2)
+    return [[a, b], [a2, b2], [a2, b]];                    // answer = (a2,b2): others (a1',b1'),(a1',b2)
   }
 
   // ---------- Explanations (short, friendly, one idea per line) ----------
@@ -324,11 +353,11 @@
     const m = minOf(t);
     const first = [];
     const rest = [];
-    if (m >= 30) first.push(fmt(t + 60)); // the hour hand is close to the next number
-    if (m % 5 === 0) rest.push(`${m === 0 ? 12 : m / 5}:${pad((h % 12) * 5)}`); // hands swapped
-    if (m % 5 === 0 && m > 0 && m / 5 < 10) rest.push(`${h}:0${m / 5}`); // read the number, not the minutes
-    if (m % 5 !== 0) rest.push(fmt(t + 5), fmt(t - 5)); // counted ticks from the wrong number
-    if (m > 0 && m < 30) rest.push(fmt(t - 60));
+    if (m >= 30) first.push(t + 60); // the hour hand is close to the next number
+    if (m % 5 === 0) rest.push(T(m === 0 ? 12 : m / 5, (h % 12) * 5)); // hands swapped
+    if (m % 5 === 0 && m > 0 && m / 5 < 10) rest.push(T(h, m / 5)); // read the number, not the minutes
+    if (m % 5 !== 0) rest.push(t + 5, t - 5); // counted ticks from the wrong number
+    if (m > 0 && m < 30) rest.push(t - 60);
     return [...first, ...shuffle(rest)];
   }
 
@@ -352,7 +381,7 @@
       lines: ['What time does the clock show?'],
       zh: '现在几点?', zhAfter: zhTime(t),
       speak: 'What time does the clock show?',
-      ...buildOptions(fmt(t), readMistakes(t), [t + 60, t - 60, t + 30, t - 30, t + 15, t + 5].map(fmt)),
+      ...buildRanked(t, readMistakes(t), [t + 60, t - 60, t + 30, t - 30, t + 15, t - 15, t + 5, t - 5], fmt, looksClock),
       answerText: fmt(t), answerSpeak: speakTime(t),
       explain: explainTime(t),
     };
@@ -362,15 +391,69 @@
     const m = { oclock: 0, half: 30, qpast: 15, qto: 45, npast: pick([5, 10, 20, 25]), nto: pick([35, 40, 50, 55]) }[kind];
     return T(rand(1, 12), m);
   }
-  function wordsDigitalMistakes(t) {
+
+  // Clock words from a kind and the number that is said: ('qto', 9) → "quarter to 9".
+  function wordsKN(kind, n, x) {
+    if (kind === 'oclock') return `${n} o'clock`;
+    if (kind === 'half') return `half past ${n}`;
+    if (kind === 'qpast') return `quarter past ${n}`;
+    if (kind === 'qto') return `quarter to ${n}`;
+    if (kind === 'npast') return `${x} past ${n}`;
+    return `${x} to ${n}`;
+  }
+  function wordsKind(t) {
+    const m = minOf(t);
+    if (m === 0) return { kind: 'oclock', n: hourOf(t), x: 0 };
+    if (m === 30) return { kind: 'half', n: hourOf(t), x: 30 };
+    if (m === 15) return { kind: 'qpast', n: hourOf(t), x: 15 };
+    if (m === 45) return { kind: 'qto', n: hourOf(t + 60), x: 15 };
+    if (m < 30) return { kind: 'npast', n: hourOf(t), x: m };
+    return { kind: 'nto', n: hourOf(t + 60), x: 60 - m };
+  }
+  const wrap12 = (n) => ((((n - 1) % 12) + 12) % 12) + 1;
+
+  // "What do we call this time?" — the answer must not be the odd one out (or the most typical):
+  // same-kind and other-kind options, same-number and other-number options, answer in a random corner.
+  function wordsChoices(t, c) {
+    const { kind, n, x } = wordsKind(t);
+    const allowed = new Set([...(c.words || []), 'oclock', 'half']);
+    const related = {
+      oclock: ['half'], half: ['oclock', 'qpast', 'qto'], qpast: ['qto', 'half'], qto: ['qpast', 'half'],
+      npast: ['nto'], nto: ['npast'],
+    }[kind].filter((k) => allowed.has(k) || k === 'nto' || k === 'npast');
+    const k2 = pick(related.length ? related : ['oclock']);
+    const n2 = wrap12(n + pick([-1, 1]));
+    const words = (f) => wordsKN(f[0], f[1], f[0] === 'npast' || f[0] === 'nto' ? x : 0);
+    const trip = cornerTriple([kind, n], k2, n2).map(words);
+    const out = shuffle(trip.slice());
+    return { options: out, answerIdx: out.indexOf(trip[0]), answer: trip[0] };
+  }
+
+  // "Which time is half past 8?" — the said number (8) must not single out the answer.
+  function digitalChoices(t) {
     const h = hourOf(t);
     const m = minOf(t);
-    if (m === 45) return [t + 60, t + 30, t - 30];          // "quarter to 9": 9:45, 9:15, 8:15
-    if (m === 15) return [t + 30, T(h, 25), t - 30];        // "quarter past 4": 4:45, 4:25 (a quarter is 25¢!), 3:45
-    if (m === 30) return [t - 60, t + 60, t - 30];
-    if (m === 0) return [t + 30, t + 60, t - 60];
-    if (m < 30) return [T(h, 60 - m), t + 60, t - 60];     // past ↔ to mix-up
-    return [T(h + 1, 60 - m), t + 60, T(h, 60 - m)];
+    const isTo = m > 30;
+    const nx = hourOf(t + 60);
+    // Other minutes = classic mix-ups: past ↔ to, "a quarter is 25", or the number the long hand is on.
+    const m2s = { 0: [30, 12], 30: [0, 6, 45], 15: [45, 25, 3], 45: [15, 9] }[m] || (m % 5 === 0 ? [60 - m, m / 5] : [60 - m]);
+    // "Past" times: the said number is the answer's hour, so keep that hour on two options.
+    // "To" times: the said number is the next hour — the classic trap — so it is usually in.
+    const roles = isTo ? [0, 1, 2] : [0, 1];
+    const hours = isTo ? [nx, nx, wrap12(h - 1)] : [wrap12(h - 1), wrap12(h + 1)];
+    const configs = [];
+    for (const role of roles) {
+      for (const h2 of hours) for (const m2 of m2s) {
+        const trip = cornerTriple([h, m], h2, m2, [role]).map(([x, y]) => T(x, y));
+        const rank = trip.filter((x) => looksClock(x) < looksClock(trip[0])).length;
+        configs.push({ trip, rank });
+      }
+    }
+    // Even out where the answer sits in size order (smallest / middle / biggest).
+    const rank = pick([...new Set(configs.map((c) => c.rank))]);
+    const trip = pick(configs.filter((c) => c.rank === rank)).trip.map(fmt);
+    const out = shuffle(trip.slice());
+    return { options: out, answerIdx: out.indexOf(trip[0]), answer: trip[0] };
   }
 
   function makeWords(c, variant) {
@@ -390,16 +473,15 @@
         type: 'words', mode: 'choice', variant: 'toDigital', show: null, reveal: t,
         lines: [`Which time is {${words}}?`], zh: '', zhAfter: zhTime(t),
         speak: `Which time is ${words}?`,
-        ...buildOptions(fmt(t), wordsDigitalMistakes(t).map(fmt), [t + 60, t - 60, t + 30, t + 5].map(fmt)),
+        ...digitalChoices(t),
         answerText: fmt(t), answerSpeak: speakTime(t), explain,
       };
     }
-    const cands = [...shuffle([t + 30, t - 30]), t + 60, t - 60].map(wordsFor);
     return {
       type: 'words', mode: 'choice', variant: 'toWords', show: t, reveal: t,
       lines: ['What do we call this time?'], zh: '现在几点?', zhAfter: zhTime(t),
       speak: 'Which words match the clock?',
-      ...buildOptions(words, cands, []),
+      ...wordsChoices(t, c),
       answerText: words, answerSpeak: words, explain,
     };
   }
@@ -457,7 +539,7 @@
     if (carry) out.push(b - 60);            // forgot to move the hour on
     if (d >= 60 && d % 60) out.push(a + (d % 60)); // forgot the hours
     out.push(b + 60);
-    return out.filter((x) => norm(x) !== norm(a)).map(fmt);
+    return out.filter((x) => norm(x) !== norm(a));
   }
 
   function makeElapsed(c, variant) {
@@ -484,7 +566,7 @@
       }
       return {
         ...base, mode: 'choice', variant: 'later', show: A, lines, speak,
-        ...buildOptions(fmt(B), laterMistakes(A, d), [B + 30, B - 15, B + 15, B - 5, B + 5, B + 10].filter((x) => norm(x) !== norm(A)).map(fmt)),
+        ...buildRanked(B, laterMistakes(A, d), [B + 30, B - 15, B + 15, B - 30, B - 5, B + 5, B + 10, B - 10].filter((x) => norm(x) !== norm(A)), fmt, looksClock),
       };
     }
     if (v === 'howlong') {
@@ -504,7 +586,7 @@
         lines: [`${emoji} ${fill(l1, vals)}`, l2],
         speak: plain(`${l1.replace('{A}', speakTime(A)).replace('{B}', speakTime(b2))} ${l2}`),
         zh: `${zhTime(A)} → ${zhTime(b2)}`, zhAfter: zhDur(dd),
-        ...buildOptions(durText(dd), cands.filter((x) => x > 0 && x !== dd).map(durText), []),
+        ...buildRanked(dd, cands.filter((x) => x > 0 && x !== dd), [dd + 10, dd - 10, dd + 20, dd - 20].filter((x) => x > 0), durText, (x) => x),
         answerText: durText(dd), answerSpeak: durWords(dd),
         explain: [explainForward(A, dd).replace(/\.$/, '') + ` → ${durWords(dd)}`],
         wedge: { from: A, delta: dd },
@@ -513,13 +595,13 @@
     // earlier: "The party starts at 3:10. The walk takes 30 minutes. When should we leave?"
     const [emoji, l1, l2] = pick(EARLIER);
     const vals = { B: fmt(B), D: durWords(d) };
-    const cands = [A + 60, B + d, A - 60, A + 30].filter((x) => norm(x) !== norm(B)).map(fmt);
+    const cands = shuffle([A + 60, B + d, A - 60, A + 30]).filter((x) => norm(x) !== norm(B));
     return {
       type: 'elapsed', mode: 'choice', variant: 'earlier', show: B, start: B, d,
       lines: [`${emoji} ${fill(l1, vals)}`, fill(l2, vals)],
       speak: plain(`${l1.replace('{B}', speakTime(B))} ${l2.replace('{D}', durWords(d))}`),
       zh: `${zhTime(B)} − ${zhDur(d)}`, zhAfter: zhTime(A),
-      ...buildOptions(fmt(A), cands, [A - 15, A + 15, A - 5].map(fmt)),
+      ...buildRanked(A, cands, [A - 15, A + 15, A - 5, A + 5, A - 30].filter((x) => norm(x) !== norm(B)), fmt, looksClock),
       answerText: fmt(A), answerSpeak: speakTime(A),
       explain: [explainBackward(B, d)], wedge: { from: B, delta: -d },
     };
@@ -680,11 +762,14 @@
       clockT = nearest(q.start);
       moveClock(clockT, 0.7);
       q.wedgeFrom = q.wedge ? clockT : null;
+      q.startClock = clockT;
     } else if (q.show != null) {
       clockT = nearest(q.show);
       moveClock(clockT, 0.7);
       q.wedgeFrom = q.wedge ? clockT : null;
     }
+    q.shownAt = time; // answers in the first moments after a question appears are ignored (double taps)
+    q.hints = 0;
     updateHud();
     MQ.Voice.say(q.speak, 'en-US', { interrupt: true });
     if (data.settings.chinese && q.mode === 'set' && q.type === 'set') MQ.Voice.say(q.zh, 'zh-CN');
@@ -717,10 +802,24 @@
     if (right) s.right++;
   }
 
+  // A double tap on Next ▶ or a double return lands on the next question before he has seen it.
+  const SETTLE = 0.6;
+  const tooSoon = () => !q || time - q.shownAt < SETTLE;
+
+  // Tapping an answer button: pick it and check it (but not a tap left over from a double tap).
+  function choose(i) {
+    if (state !== 'play' || phase !== 'ask' || !q || tooSoon()) return;
+    sel = i;
+    submit();
+  }
+
   function submit() {
     if (state !== 'play' || phase !== 'ask' || !q) return;
+    if (tooSoon()) return;
     let right;
     if (q.mode === 'set') {
+      // Hands still where they started: he hasn't tried yet — don't grade it, just nudge.
+      if (norm(clockT) === norm(q.startClock)) { nudgeMove(); return; }
       q.theirs = clockT;
       right = norm(clockT) === norm(q.target);
     } else {
@@ -808,13 +907,23 @@
   function hint() {
     if (phase !== 'ask' || !q) return;
     stats.hints++;
+    q.hints = (q.hints || 0) + 1;
     MQ.Sound.note(88, 'bell', { dur: 0.8, vel: 0.1 });
     labelFlashUntil = time + 4;
     let text;
     if (q.type === 'set') {
-      hintUntil = time + 3;
       const m = minOf(q.target);
-      text = `Look for the glowing hands! The long hand goes to ${m === 0 ? 12 : m % 5 === 0 ? m / 5 : `${Math.floor(m / 5) || 12} and ${m % 5} ticks`}.`;
+      const ticks = m % 5;
+      const spot = m === 0 ? '12' : !ticks ? `${m / 5}` : `${Math.floor(m / 5) || 12} and ${ticks} more tick${ticks > 1 ? 's' : ''}`;
+      if (q.hints >= 2 || floorMissed) {
+        // The glowing answer hands — this floor won't earn a ⭐ window now.
+        hintUntil = time + 3;
+        if (!floorMissed) { floorMissed = true; updateHud(); }
+        text = `Look for the glowing hands! The long hand goes to ${spot}. This floor won't get a star.`;
+      } else {
+        // First hint: words and the glowing minute numbers only.
+        text = `Count by 5s on the yellow numbers. The long hand goes to ${spot}. Need more help? Hint again.`;
+      }
     } else if (q.type === 'read') {
       text = 'First look at the short red hand: which number did it pass? Then count the long blue hand by 5s.';
     } else if (q.type === 'words') {
@@ -875,19 +984,20 @@
     }, 700 + 3 * 950);
   }
 
-  function starsFor(n) {
-    if (n >= 7) return 3;
-    if (n >= 5) return 2;
+  // Every wrong try counts, not just the floors that missed: 5 wrong on one floor is not "7/8".
+  function starsFor(n, wrong) {
+    if (n >= 7 && wrong <= 1) return 3;
+    if (n >= 5 && wrong <= 3) return 2;
     return 1;
   }
 
   function adapt() {
     const before = g.level;
     g.played++;
-    if (firstTry >= 7) {
+    if (starsFor(firstTry, stats.wrong) === 3) {
       g.level = Math.min(MAX_LEVEL, g.level + 1);
       g.lowRounds = 0;
-    } else if (firstTry <= 4) {
+    } else if (firstTry <= 4 || stats.wrong >= 6) {
       g.lowRounds++;
       if (g.lowRounds >= 2 && g.level > 1) { g.level--; g.lowRounds = 0; }
     } else {
@@ -896,11 +1006,12 @@
     g.maxLevel = Math.max(g.maxLevel, g.level);
     if (g.level > before) return '⬆ Level up! The next climb is a little harder.';
     if (g.level < before) return "Let's practice an easier climb, then come back up!";
+    if (firstTry >= 7) return 'Every wrong try counts. With fewer wrong tries you get 3 stars and a level up!';
     return "Let's climb this level again for more stars!";
   }
 
   function showResult(praise) {
-    const stars = starsFor(firstTry);
+    const stars = starsFor(firstTry, stats.wrong);
     const level = g.level;
     const summary = `${firstTry}/${FLOORS} first try`;
     g.history.push({
@@ -914,6 +1025,7 @@
     const move = adapt();
     persist();
     updateHud();
+    MQ.Voice.say(`${stars} star${stars > 1 ? 's' : ''}! ${move.replace(/[⬆→]/g, '').replace(/\s+/g, ' ')}`, 'en-US');
 
     state = 'result';
     const starHtml = [1, 2, 3].map((i) => `<span class="${i <= stars ? '' : 'off'}">⭐</span>`).join('');
@@ -925,6 +1037,7 @@
         <div class="praise"><span class="zh">${praise.zh}</span><small>${praise.py} · ${praise.en}</small></div>
         <div class="stats">
           <span>🪟 ${firstTry}/${FLOORS} right on the first try</span>
+          ${stats.wrong ? `<span>🔁 ${stats.wrong} wrong tr${stats.wrong === 1 ? 'y' : 'ies'}</span>` : ''}
           <span>⏱ ${mins} min</span>
           ${stats.hints ? `<span>💡 ${stats.hints} hint${stats.hints === 1 ? '' : 's'}</span>` : ''}
         </div>
@@ -1016,7 +1129,18 @@
     MQ.Sound.click();
     const text = MQ.isTouch ? '👆 Tap an answer first!' : 'Pick an answer first — use ← →';
     say(text);
+    MQ.Voice.say(MQ.isTouch ? 'Tap an answer first!' : 'Pick an answer first!', 'en-US', { interrupt: true });
     if (isPhone()) toast(text, 2.5);
+  }
+
+  // Check pressed with the hands still where they started: not graded, just a nudge.
+  function nudgeMove() {
+    MQ.Sound.click();
+    const text = MQ.isTouch ? '👆 Drag the hands first!' : 'Move the hands first! ← → ↑ ↓';
+    say(text);
+    MQ.Voice.say(MQ.isTouch ? 'Drag the hands first!' : 'Move the hands first!', 'en-US', { interrupt: true });
+    if (isPhone()) toast(text, 2.5);
+    bannerPulseAt = time;
   }
 
   // All the answer buttons bob together (same height, same time) until one is picked.
@@ -2097,7 +2221,7 @@
         ctx.fillStyle = '#000';
         ctx.fillText(i === q.answerIdx ? '✅' : '❌', x + w - 14, by + 12);
       }
-      if (phase === 'ask') hits.push({ x, y: by, w, h: bh, fn: () => { sel = i; submit(); } });
+      if (phase === 'ask') hits.push({ x, y: by, w, h: bh, fn: () => choose(i) });
     });
     if (phase === 'ask') {
       const y = top + n * (bh + gap) + 2;
@@ -2712,7 +2836,7 @@
         ctx.fillStyle = '#000';
         ctx.fillText(i === q.answerIdx ? '✅' : '❌', r.x + r.w - 14, r.y + 14);
       }
-      if (phase === 'ask') hits.push({ id, ...r, fn: () => { sel = i; coachSeen.choice = true; submit(); } });
+      if (phase === 'ask') hits.push({ id, ...r, fn: () => { if (!tooSoon()) coachSeen.choice = true; choose(i); } });
     });
     return rects;
   }

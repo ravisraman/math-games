@@ -208,6 +208,8 @@ html.touch .touchbar, html.nf-compact .touchbar { display: flex; }
 .tb-hint { background: #fff4c2; box-shadow: 0 4px 0 #e9cf6a; }
 .tb-hint:active { box-shadow: 0 1px 0 #e9cf6a; }
 .tb.off .ic { filter: grayscale(1); opacity: 0.6; }
+.tb-hint.cool { background: #f3f0e4; box-shadow: 0 4px 0 #d9d3bd; }
+.tb-hint.cool .ic { filter: grayscale(1); opacity: 0.55; }
 .card .go { margin-top: 14px; min-width: 180px; min-height: 56px; font-size: 22px; }
 
 /* ---------- Compact layout (phones: set by game.js as html.nf-compact) ---------- */

@@ -552,9 +552,10 @@
     const diff = Math.abs(s - pr.target);
     const eq = t.length ? `${t.join(' + ')} = ${s}` : 'That path has no numbers';
     if (!t.length) say(`Oops! The path needs to go through some numbers to make ${pr.target}. Try a different way — go around! ↩`);
-    else if (s > pr.target) say(`${eq}. Too much! The target is ${pr.target}. Try a different way — go around! ↩ Find a way with ${diff} less.`);
-    else say(`${eq}. Not enough to make ${pr.target}. Try a different way — go around! ↩ Find a way with ${diff} more.`);
-    MQ.Voice.say(s > pr.target ? `${s}. Too much! We need ${pr.target}. Try a different way!` : `${s}. We need ${pr.target}. ${diff} more. Try a different way!`, 'en-US', { interrupt: true });
+    else if (s > pr.target) say(`Good try! ${eq}. Too much! The target is ${pr.target}. Try a different way — go around! ↩ Find a way with ${diff} less.`);
+    else say(`Good try! ${eq}. Not enough to make ${pr.target}. Try a different way — go around! ↩ Find a way with ${diff} more.`);
+    const spoken = t.length ? `Good try! ${t.join(' plus ')} makes ${s}. ` : 'Good try! ';
+    MQ.Voice.say(spoken + (s > pr.target ? `That's too much. We need ${pr.target}. Try a different way!` : `We need ${pr.target}. Try a different way!`), 'en-US', { interrupt: true });
     updateHud();
   }
 
@@ -591,11 +592,15 @@
     const next = S.slice(0, Math.max(1, k) + 1);
     const shown = next[next.length - 1];
     const isNum = puzzle.cells[shown].pair < 0;
-    if (hintSeen[p].size >= hintCap(p) && !(isNum && hintSeen[p].has(shown))) {
+    // Never past the first half of the route (counted from the dot he started on), and never
+    // more than half of its numbers in all (so starting from the other dot doesn't help either).
+    const tooFar = !isNum || next.length - 1 > hintCap(p);
+    if (tooFar || (hintSeen[p].size >= hintCap(p) && !hintSeen[p].has(shown))) {
       // Half the route is shown already: the rest is his to find (and add).
       MQ.Sound.note(64, 'bell', { dur: 0.5, vel: 0.1 });
       say(`💪 You can do the rest — add them up! ${pr.color.emoji} Make ${pr.target}.`);
       MQ.Voice.say(`You can do the rest. Add them up! Make ${pr.target}.`, 'en-US', { interrupt: true });
+      updateHud();
       return;
     }
     const wait = hintWait();
@@ -605,7 +610,7 @@
       MQ.Voice.say('Try it yourself first! Another hint soon.', 'en-US', { interrupt: true });
       return;
     }
-    if (isNum) hintSeen[p].add(shown);
+    hintSeen[p].add(shown);
     lastHintAt = stats.seconds;
     // Anything else sitting on those cells gets trimmed back so the hint path fits.
     let moved = false;
@@ -909,14 +914,39 @@
     }
   }
   canvas.addEventListener('pointermove', (ev) => {
+    if (doneGrab && state === 'play') {
+      // Pressed on a finished ✅ pair: only once the finger leaves the touched cell does he
+      // really mean to re-draw it.
+      ev.preventDefault();
+      const pt = boardPos(ev);
+      const c = cellAtPos(pt);
+      const left = doneGrab.cell >= 0 ? c !== doneGrab.cell : Math.hypot(pt.x - doneGrab.pt.x, pt.y - doneGrab.pt.y) > geo.cell * 0.5;
+      if (!left) return;
+      const { i } = doneGrab;
+      doneGrab = null;
+      cursor = i;
+      pressCell(i, true);
+      pointerDrawing = drawing >= 0;
+      fingerPt = pt;
+      if (pointerDrawing) followFinger(pt);
+      return;
+    }
     if (!pointerDrawing || drawing < 0 || state !== 'play') return;
     ev.preventDefault();
     const pt = boardPos(ev);
     fingerPt = pt;
     followFinger(pt);
   });
-  const endPointer = () => {
+  const endPointer = (ev) => {
     fingerPt = null;
+    if (doneGrab) {
+      // A plain tap on a finished pair: leave it alone.
+      doneGrab = null;
+      if (ev && ev.type === 'pointerup' && state === 'play') {
+        MQ.Sound.note(72, 'bell', { dur: 0.5, vel: 0.1 });
+        say('That one is done! ✅', { speak: true });
+      }
+    }
     if (!pointerDrawing) return;
     pointerDrawing = false;
     if (drawing >= 0) release(false);
@@ -963,8 +993,8 @@
   }
 
   function starsFor(s) {
-    if (s.hints === 0 && s.resets === 0 && s.wrongs <= 2) return 3;
-    if (s.hints <= 1 && s.resets <= 1) return 2;
+    if (s.hints === 0 && s.resets === 0 && s.wrongs <= 1) return 3;
+    if (s.hints <= 1 && s.resets <= 1 && s.wrongs <= 3) return 2; // (guessing route after route isn't 2★)
     return 1;
   }
 
@@ -1013,6 +1043,7 @@
 
     state = 'result';
     if (stars) setTimeout(() => MQ.Sound.star(), 200);
+    if (stats.hints > 1) setTimeout(() => MQ.Voice.say('Hints help you learn! Next time, try adding more of them up yourself.', 'en-US'), 900);
     const starHtml = [1, 2, 3].map((i) => `<span class="${i <= stars ? '' : 'off'}">⭐</span>`).join('');
     const sums = puzzle.pairs.map((pr, p) => `<div>${dotHtml(pr, true)} ${terms(p).join(' + ')} = ${sumOf(p)}</div>`).join('');
     showOverlay(`
@@ -1026,6 +1057,7 @@
           <span>💡 ${stats.hints} hint${stats.hints === 1 ? '' : 's'}</span>
           <span>🔄 ${stats.resets} restart${stats.resets === 1 ? '' : 's'}</span>
         </div>
+        ${stats.hints > 1 ? '<div class="next">💡 Hints help you learn! Next time, try adding more of them up yourself — that gets more ⭐.</div>' : ''}
         <div class="next">${move.text}</div>
         ${newHero ? `<div class="next">🎉 New hero unlocked: ${newHero.emoji} ${newHero.name}! Pick it in the portal.</div>` : ''}
         <div class="press keys-only">Press <span class="key">return</span> for the next puzzle</div>
@@ -1093,6 +1125,7 @@
         <p>Connect each pair of dots.<br>The numbers on your path must <b>add up</b> to the dot!</p>
         ${first || g.level <= 2 ? demo : '<p class="hint">🤔 The short way is usually wrong — add up and go around!</p>'}
         <div class="targets">${targets}</div>
+        ${live() ? '' : '<p class="hint">🧠 Add them up in your head! The total shows when you reach the other dot.</p>'}
         ${first ? `<p class="hint keys-only">Move with the arrows. Press <span class="key">space</span> on a dot, then walk to its twin.<br>Step back to undo. Stuck? Press <span class="key">H</span> for a hint.</p>` : ''}
         ${first ? `<p class="hint touch-only">👆 Put your finger on a dot and drag to its twin.<br>Slide back to undo. Stuck? Tap 💡 Hint.</p>` : ''}
         <div class="press keys-only">Press <span class="key">return</span> to start</div>
@@ -1119,6 +1152,7 @@
     active = 0;
     say(kb(`The box is on the ${pr.color.emoji} ${pr.target}. Press space to start drawing!`, `👆 Put your finger on the ${pr.color.emoji} ${pr.target} and drag to the other ${pr.color.emoji} ${pr.target}!`));
     updateHud();
+    if (!live() && !toldHead) { toldHead = true; MQ.Voice.say('Add them up in your head! The total shows at the other dot.', 'en-US'); }
   }
 
   function showPause() {
@@ -1468,7 +1502,9 @@
     const hpt = pts[pts.length - 1];
     const cell = geo.cell;
     const k = finger ? 1.35 : 1; // bigger on a phone
-    const text = `${s}`;
+    // Level 3+: no running total (and no green / orange) until the path reaches the other dot.
+    const reveal = live() || isComplete(p);
+    const text = reveal ? `${s}` : '?';
     const sub = ` / ${pr.target}`;
     const fBig = Math.round(cell * 0.26 * k), fSmall = Math.round(cell * 0.16 * k);
     ctx.font = `900 ${fBig}px ${UI_FONT}`;
@@ -1494,8 +1530,9 @@
       by = hpt.y + (r > 0 ? -cell * 0.5 : cell * 0.5);
       bx = Math.max(geo.x0 + w / 2 + 2, Math.min(geo.x0 + cell * puzzle.n - w / 2 - 2, bx));
     }
-    const fill = s === pr.target ? '#2e9e5b' : s > pr.target ? '#e8742a' : '#ffffff';
-    const ink = s === pr.target || s > pr.target ? '#ffffff' : pr.color.dark;
+    const good = reveal && s === pr.target, over = reveal && s > pr.target;
+    const fill = good ? '#2e9e5b' : over ? '#e8742a' : '#ffffff';
+    const ink = good || over ? '#ffffff' : pr.color.dark;
     ctx.save();
     ctx.shadowColor = 'rgba(0,0,0,0.35)';
     ctx.shadowBlur = 8;
@@ -1680,6 +1717,7 @@
     last = now;
     update(dt);
     draw();
+    updateHintBtn();
     requestAnimationFrame(frame);
   }
 

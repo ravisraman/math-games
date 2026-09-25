@@ -93,9 +93,11 @@
 
     // How amounts are written: cents first, then dollars, then mixed so he has to convert.
     c.format = L <= 7 ? 'cents' : L <= 9 ? 'dollars' : 'mixed';
-    c.roads = Math.min(2 + Math.floor((L - 1) / 3), 5);
+    // Traffic tops out early (at most 4 roads, cars no faster than about 1.8 cells a second)
+    // so the stars and the level depend on the money math, not on dodging.
+    c.roads = Math.min(2 + Math.floor((L - 1) / 3), 4);
     c.maxRun = L < 10 ? 2 : 3; // longest stretch of back-to-back roads
-    c.speed = Math.min(1.0 + 0.12 * (L - 1), 3.4);
+    c.speed = Math.min(1.0 + 0.12 * (L - 1), 1.45); // a lane varies up to x1.25 of this
     c.maxCars = L <= 2 ? 2 : L <= 11 ? 3 : 4;
     c.buses = L >= 5;
     c.extras = Math.min(3 + Math.floor(L / 3), 7);
@@ -165,6 +167,7 @@
   let gateUnlocked = false; // level 3+: the gate opens only once he walks in with the exact amount
   let gateCooldown = 0; // level 3+: a moment after a wrong try before the gate listens again
   const WRONG_TRIES_FOR_HELP = 2;
+  const MAX_CAR_SPEED = 1.8; // cells per second
 
   function total() { return pouch.reduce((s, c) => s + c.v, 0); }
   // Is the gate open (drawn raised and golden)? Levels 1-2: as soon as the amount is exact.
@@ -251,7 +254,7 @@
     // come into view closer to the hero. The 13-column board is unchanged.
     const span = COLS + 4;
     const narrow = COLS < 13;
-    const speed = cfg.speed * (narrow ? 0.9 : 1) * (0.75 + Math.random() * 0.5);
+    const speed = Math.min(MAX_CAR_SPEED, cfg.speed * (narrow ? 0.9 : 1) * (0.75 + Math.random() * 0.5));
     const maxCars = narrow ? Math.max(1, Math.round(cfg.maxCars * span / 17 - 0.25)) : cfg.maxCars;
     const n = rand(1, maxCars);
     const gap = span / n;
@@ -288,6 +291,8 @@
       if (!needRevealed) {
         need.textContent = `Hop into the castle 🏰 when you think you have exactly ${MQ.money(target, targetFmt)}`;
         need2.textContent = 'Then hop in 🏰';
+      } else if (t === target) {
+        need.textContent = need2.textContent = 'Hop in! 🏰';
       } else if (t > target) {
         need.textContent = need2.textContent = `${MQ.money(t - target, targetFmt)} too many`;
       } else {
@@ -520,6 +525,7 @@
     player.r = BANK_ROW + 1;
     player.t = 0;
     player.bounce = true; // don't grab a coin on the way back down
+    player.inv = Math.max(player.inv, 0.9); // and don't get bonked for it if row 1 is a road
     gateCooldown = time + 0.8;
     const { x, y } = cellCenter(BANK_ROW, player.c);
     floaters.push({ x, y: y - 24, text: 'Not yet!', life: 1.2, color: '#e07b00' });
@@ -590,6 +596,29 @@
     }
   }
 
+  // Level 3+: every coin goes in the pouch, even one that takes him over. The message and
+  // sound are the same either way, so nothing tells him he is done or over; the gate judges.
+  function takeCoin(coin) {
+    const before = total();
+    coin.taken = true;
+    coin.warned = false;
+    pouch.push(coin);
+    if (before + coin.v > target) stats.overshoots++;
+    MQ.Sound.coin(coin.v);
+    const { x, y } = cellCenter(coin.r, coin.c);
+    burst(x, y, coin.v >= 100 ? '#6fcf6f' : '#ffd23f', 14);
+    floaters.push({ x, y: y - 20, text: `+${coin.v >= 100 ? MQ.dollars(coin.v) : coin.v + '¢'}`, life: 1 });
+    const now = total();
+    updateHud();
+    let text = `You picked up a ${COINS[coin.v].name}. Now you have ${MQ.money(now, pouchFmt)}.`;
+    // The dead-end hint is help he earns after 2 wrong tries at the gate.
+    if (helpOn() && now < target && !canMake(target - now, coins.filter((c) => !c.taken).map((c) => c.v))) {
+      text += ` The coins left can't make ${MQ.money(target, targetFmt)} — ${PUT_BACK()} to put a coin back.`;
+      MQ.Voice.say('The coins left can\'t make it. Put a coin back.', 'en-US', { interrupt: true });
+    }
+    say(text);
+  }
+
   function putBack() {
     const coin = pouch.pop();
     if (!coin) { say('Your pouch is empty.'); return; }
@@ -631,6 +660,7 @@
   // ---------- Win / results / adapting difficulty ----------
   function win() {
     state = 'won';
+    if (cfg.judge) { gateUnlocked = true; MQ.Sound.open(); }
     MQ.Sound.win();
     const { x, y } = cellCenter(0, player.c);
     for (let i = 0; i < 5; i++) setTimeout(() => burst(x + rand(-150, 150), y + rand(0, 200), pick(CAR_COLORS), 26), i * 150);
@@ -642,6 +672,13 @@
   }
 
   function starsFor(s) {
+    if (cfg.judge) {
+      // Level 3+: stars are about the money math. Going over or guessing at the gate costs.
+      const slips = s.overshoots + s.wrongGate;
+      if (slips === 0 && s.bonks <= 1) return 3;
+      if (slips <= 2) return 2;
+      return 1;
+    }
     if (s.overshoots <= 1 && s.bonks <= 1) return 3;
     if (s.overshoots <= 3 && s.bonks <= 3) return 2;
     return 1;
@@ -694,6 +731,7 @@
         <div class="stats">
           <span>🎯 ${MQ.money(target, targetFmt)}</span>
           <span>🙈 ${stats.overshoots} too-much</span>
+          ${cfg.judge ? `<span>🏰 ${stats.wrongGate} not-yet</span>` : ''}
           <span>🚗 ${stats.bonks} bonk${stats.bonks === 1 ? '' : 's'}</span>
         </div>
         <div class="next">${move.text}</div>
@@ -968,15 +1006,17 @@
     if (state !== 'intro') return;
     hideOverlay();
     state = 'play';
+    boardQuietUntil = performance.now() + QUIET_MS;
     MQ.Sound.click();
     say(`Collect exactly ${MQ.money(target, targetFmt)}, then hop into the castle!`);
+    if (cfg.judge) MQ.Voice.say(`Count your coins. Hop into the castle when you think you have exactly ${MQ.moneyWords(target)}.`, 'en-US', { interrupt: true });
     maybeShowTouchHint();
   }
 
   function showPause() {
     state = 'pause';
     let sel = 0;
-    const items = [['▶ Keep playing', () => { hideOverlay(); state = 'play'; }], ['🏠 Back to the portal', () => { persist(); location.href = '../../index.html'; }]];
+    const items = [['▶ Keep playing', resumePlay], ['🏠 Back to the portal', () => { persist(); location.href = '../../index.html'; }]];
     const render = () => {
       showOverlay(`
         <div class="card">
@@ -1007,7 +1047,7 @@
 
   function update(dt) {
     time += dt;
-    const gateGoal = total() === target ? 1 : 0;
+    const gateGoal = gateOpen() ? 1 : 0;
     gateLift += Math.sign(gateGoal - gateLift) * Math.min(Math.abs(gateGoal - gateLift), dt * 2.5);
     for (const c of coins) {
       if (c.fly) { c.fly.t += dt / 0.35; if (c.fly.t >= 1) c.fly = null; }
@@ -1267,7 +1307,10 @@
   }
 
   function drawCastleParts(W, CASTLE_H) {
-    const open = total() === target;
+    const open = gateOpen();
+    // Level 3+: the right-hand sign stays the same until he hops in with the exact amount.
+    const gateTitle = cfg.judge && !open ? 'THE GATE' : null;
+    const gateWord = (short) => (open ? (short ? 'OPEN ⬆' : 'OPEN! ⬆') : cfg.judge ? 'CHECKS' : 'LOCKED');
     const brick = '#c96a4a';
     const mortar = 'rgba(90,30,20,0.35)';
     const slim = W < 800;
@@ -1363,14 +1406,14 @@
       const sw = Math.min(150, W / 2 - kw / 2 - (towerX + towerW / 2) - 10);
       const scx = (towerX + towerW / 2 + W / 2 - kw / 2) / 2;
       sign(scx, 108, 'NEEDS', MQ.money(target, targetFmt), '#b3471a', sw, 64);
-      sign(W - scx, 108, 'GATE', open ? 'OPEN ⬆' : 'LOCKED', open ? '#2e9e5b' : '#6b6475', sw, 64);
+      sign(W - scx, 108, 'GATE', gateWord(true), open ? '#2e9e5b' : '#6b6475', sw, 64);
     } else if (W > 1000) {
       // Landscape phone: a very wide, short castle, so the signs can be bigger.
       sign(250, 100, 'CASTLE NEEDS', MQ.money(target, targetFmt), '#b3471a', 240, 84);
-      sign(W - 250, 100, 'THE GATE IS', open ? 'OPEN! ⬆' : 'LOCKED', open ? '#2e9e5b' : '#6b6475', 240, 84);
+      sign(W - 250, 100, gateTitle || 'THE GATE IS', gateWord(false), open ? '#2e9e5b' : '#6b6475', 240, 84);
     } else {
       sign(230, 104, 'CASTLE NEEDS', MQ.money(target, targetFmt), '#b3471a');
-      sign(W - 230, 104, 'THE GATE IS', open ? 'OPEN! ⬆' : 'LOCKED', open ? '#2e9e5b' : '#6b6475');
+      sign(W - 230, 104, gateTitle || 'THE GATE IS', gateWord(false), open ? '#2e9e5b' : '#6b6475');
     }
 
     // Golden doorstep glows along the whole wall when open (any column can enter).
@@ -1663,7 +1706,7 @@
   });
 
   // Small hook for automated tests.
-  window.__coinCrossing = { quiz: QUIZ, get state() { return state; }, get target() { return target; }, get coins() { return coins; }, get player() { return player; }, total, get level() { return g.level; }, get layout() { return layout; }, get lanes() { return lanes; }, get grid() { return { cols: COLS, rows: ROWS, castle: CASTLE_H, w: W, h: H }; }, startQuiz };
+  window.__coinCrossing = { quiz: QUIZ, get state() { return state; }, get target() { return target; }, get coins() { return coins; }, get player() { return player; }, total, get level() { return g.level; }, get layout() { return layout; }, get lanes() { return lanes; }, get grid() { return { cols: COLS, rows: ROWS, castle: CASTLE_H, w: W, h: H }; }, get stats() { return stats; }, get cfg() { return cfg; }, get pouch() { return pouch.map((c) => c.v); }, get gateLift() { return gateLift; }, startQuiz };
 
   syncMusicBtn();
   resize();
