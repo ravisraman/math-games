@@ -200,6 +200,88 @@
       </div>`;
   }
 
+  // ---------- Sync between the laptop and the iPhone ----------
+  function ago(t) {
+    if (!t) return 'not yet';
+    const s = Math.round((Date.now() - t) / 1000);
+    if (s < 60) return 'just now';
+    if (s < 3600) return `${Math.round(s / 60)} min ago`;
+    return new Date(t).toLocaleString();
+  }
+
+  function syncCard() {
+    const S = MQ.Sync;
+    if (!S.code) {
+      return `
+        <h3>🔄 Sync laptop ⇄ iPhone</h3>
+        <p>Keep stars, levels and heroes the same on every device, automatically.</p>
+        <div class="row" style="justify-content:flex-start">
+          <button class="btn small" id="sync-start">Turn on sync</button>
+        </div>
+        <p class="muted" style="margin-top:12px">Already turned it on on another device? Type its sync code here:</p>
+        <div class="row sync-join" style="justify-content:flex-start">
+          <input type="text" id="sync-code" placeholder="XXXX-XXXX-XXXX" maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false">
+          <button class="btn secondary small" id="sync-join">Join</button>
+        </div>
+        <p class="sync-msg" id="sync-msg"></p>`;
+    }
+    return `
+      <h3>🔄 Sync laptop ⇄ iPhone <span class="sync-on">ON</span></h3>
+      <p>Family sync code:</p>
+      <div class="sync-code">${S.pretty(S.code)}</div>
+      <p class="muted">On the other device, open Math Quest → ⚙️ Grown-ups → type this code under <b>Sync</b> → Join. On iPhone, do this inside the Home Screen app.</p>
+      <p class="muted">Last synced: <b id="sync-when">${ago(S.lastSync)}</b>${S.lastError ? ` · <span class="sync-err">offline — will retry</span>` : ''}</p>
+      <div class="row" style="justify-content:flex-start">
+        <button class="btn secondary small" id="sync-now">Sync now</button>
+        <button class="btn secondary small" id="sync-copy">Copy code</button>
+        <button class="btn secondary small" id="sync-stop">Stop syncing here</button>
+      </div>
+      <p class="sync-msg" id="sync-msg"></p>`;
+  }
+
+  function wireSync() {
+    const box = $('gp-sync');
+    const msg = (t, bad) => { const m = $('sync-msg'); if (m) { m.textContent = t; m.classList.toggle('bad', !!bad); } };
+    const redraw = () => { box.innerHTML = syncCard(); wireSync(); };
+    const on = (id, fn) => { const el = $(id); if (el) el.addEventListener('click', fn); };
+    on('sync-start', async () => {
+      msg('Turning on…');
+      await MQ.Sync.start();
+      data = MQ.load();
+      redraw();
+      render();
+    });
+    on('sync-join', async () => {
+      msg('Joining…');
+      try {
+        await MQ.Sync.join($('sync-code').value);
+        data = MQ.load();
+        MQ.applySettings(data.settings);
+        redraw();
+        render();
+        msg('Joined! Progress from the other device is here now.');
+      } catch (e) {
+        msg(e.message || 'Could not join.', true);
+      }
+    });
+    on('sync-now', async () => {
+      msg('Syncing…');
+      const r = await MQ.Sync.now();
+      data = MQ.load();
+      render();
+      redraw();
+      msg(r ? 'All synced ✓' : 'Could not reach the sync service — it will retry automatically.', !r);
+    });
+    on('sync-copy', async () => {
+      try { await navigator.clipboard.writeText(MQ.Sync.pretty(MQ.Sync.code)); msg('Code copied.'); } catch (e) { msg('Select and copy the code above.'); }
+    });
+    on('sync-stop', () => {
+      if (!confirm('Stop syncing on this device? Progress stays here, but it will no longer update from the other device.')) return;
+      MQ.Sync.stop();
+      redraw();
+    });
+  }
+
   function renderGrownups() {
     $('gp-body').innerHTML = `
       <div class="gp-grid">
@@ -214,9 +296,18 @@
           ${MQ.isTouch && !MQ.isStandalone ? `<div class="install-tip">📱 <b>Make it an app:</b> in Safari tap the Share button (the square with an arrow ⬆), then <b>Add to Home Screen</b>. It opens full-screen and works offline.</div>` : ''}
           <p class="muted">Each game adapts on its own: it moves up after a great round and down after two hard ones. Use −/+ if a game feels too easy or too hard.</p>
         </div>
+        <div class="gp-card sync-card" id="gp-sync">${syncCard()}</div>
+        <div class="gp-card">
+          <h3>🔊 Read-aloud voice</h3>
+          <p>This device is using: <b>${MQ.escapeHtml(MQ.Voice.describe('en-US'))}</b> (English) · <b>${MQ.escapeHtml(MQ.Voice.describe('zh-CN'))}</b> (Chinese)</p>
+          <div class="row" style="justify-content:flex-start"><button class="btn secondary small" id="gp-voice-test">▶ Test voice</button></div>
+          <p class="muted">For a much more natural voice, download a free <b>Premium</b> voice once on each device — the games pick it automatically:<br>
+          <b>iPhone:</b> Settings → Accessibility → Spoken Content → Voices → English → <b>Ava (Premium)</b> or <b>Zoe (Premium)</b>; and Chinese (China mainland) → <b>Lili (Premium)</b>.<br>
+          <b>Mac:</b> System Settings → Accessibility → Spoken Content → System voice → Manage Voices… → the same voices.</p>
+        </div>
         <div class="gp-card">
           <h3>Save & backup</h3>
-          <p class="muted">Progress saves automatically on this device (the laptop and the iPhone each keep their own). Use a backup file to move it to another browser or computer.</p>
+          <p class="muted">Progress saves automatically. With sync on, the laptop and iPhone share it; a backup file is an extra safety copy.</p>
           <div class="row" style="justify-content:flex-start">
             <button class="btn secondary small" id="gp-export">⬇ Download backup</button>
             <label class="btn secondary small" style="margin:0">⬆ Restore backup <input type="file" id="gp-import" accept="application/json,.json" hidden></label>
@@ -235,6 +326,11 @@
     setting('gp-music', 'music');
     setting('gp-voice', 'voice');
     setting('gp-chinese', 'chinese');
+    $('gp-voice-test').addEventListener('click', () => {
+      MQ.Voice.say(`Hi ${data.player.name || 'there'}! Let's collect exactly forty-seven cents.`, 'en-US', { interrupt: true });
+      MQ.Voice.say('太棒了！四十七分。', 'zh-CN');
+    });
+    wireSync();
     $('gp-name').addEventListener('input', (e) => { data.player.name = e.target.value.trim(); MQ.save(data); render(); });
 
     $('gp-body').querySelectorAll('[data-level]').forEach((btn) => btn.addEventListener('click', () => {
@@ -280,6 +376,16 @@
   });
   $('gp-close').addEventListener('click', () => $('grownups').close());
   $('grownups').addEventListener('close', () => { data = MQ.load(); render(); focusFirst(); });
+
+  // When newer progress arrives from the other device, refresh what's on screen.
+  MQ.Sync.onChange((info) => {
+    if (!info.changed) return;
+    data = MQ.load();
+    MQ.applySettings(data.settings);
+    render();
+    const when = $('sync-when');
+    if (when) when.textContent = 'just now';
+  });
 
   MQ.Music.play('twinkle');
   render();

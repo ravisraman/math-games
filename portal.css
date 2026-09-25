@@ -280,3 +280,9 @@ footer { padding-bottom: max(30px, calc(env(safe-area-inset-bottom) + 12px)); }
 @media (prefers-reduced-motion: reduce) {
   .tile .art span, .sky .cloud { animation: none; }
 }
+
+.sync-on { font-size: 12px; background: var(--good); color: #fff; border-radius: 999px; padding: 2px 8px; vertical-align: middle; margin-left: 6px; }
+.sync-code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 26px; font-weight: 800; letter-spacing: 2px; background: #fff; border: 2px dashed #cbbfa9; border-radius: 12px; padding: 8px 12px; display: inline-block; -webkit-user-select: all; user-select: all; }
+.sync-join input { font: inherit; font-size: 18px; letter-spacing: 1px; text-transform: uppercase; padding: 6px 10px; border-radius: 10px; border: 2px solid var(--line); width: 12em; max-width: 100%; }
+.sync-msg { min-height: 1.2em; font-weight: 700; color: var(--good); }
+.sync-msg.bad, .sync-err { color: var(--bad); }

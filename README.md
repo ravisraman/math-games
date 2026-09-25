@@ -46,7 +46,7 @@ that add up to **exactly** the amount the castle needs. Then hop into the castle
 - **Too much?** If a coin would go over the target, the game won't take it. It explains why:
   *"38¢ + a quarter (25¢) would be 63¢. You only need 9¢ more."*
 - **Space** puts the last coin back, so the player can never get stuck.
-- **Cars** bump you back to the start. Your coins stay safe in your pouch.
+- **Cars** send you back to the start and your coins fly back to their spots, so the level starts over.
 - **Bonus question** after every level: adding 2–3 numbers, counting coins, subtracting,
   making change, and converting cents to dollars and back. Weaker skills come up more often.
 - **Chinese numbers** (optional): amounts also appear as 四十七分 / 一元三角五分
