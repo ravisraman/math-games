@@ -271,7 +271,7 @@
     // Compact copy for the phone HUD (next to the target).
     const need2 = el('need2');
     need2.classList.toggle('done', t === target);
-    if (t === target) need2.textContent = '✅ Exactly! Hop up ⬆';
+    if (t === target) need2.textContent = '✅ Exactly! ⬆';
     else if (needRevealed) need2.textContent = `Need ${MQ.money(target - t, targetFmt)} more`;
     else need2.textContent = 'Need ? more 🤔';
     el('btn-back').classList.toggle('empty', pouch.length === 0);
