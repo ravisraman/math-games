@@ -298,7 +298,9 @@
       if (cost < 1 && (cost === 0 || clock() - t0 > 6)) break;
     }
     if (best) return best;
-    return generate(L, (forcePairs || cfg.pairs) - 1); // board too crowded: one fewer pair
+    const fewer = (forcePairs || cfg.pairs) - 1;
+    if (fewer >= 1) return generate(L, fewer); // board too crowded: one fewer pair
+    return generate(Math.max(1, L - 1)); // never loop forever: fall back to an easier level's board
   }
 
   // ---------- Game state ----------
