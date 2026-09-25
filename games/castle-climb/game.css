@@ -132,6 +132,8 @@ body { background: linear-gradient(180deg, #ffe3c4 0%, #fff4e4 55%, #ffeede 100%
 .card p { font-size: 19px; margin: 8px 0; }
 .card .goal { font-size: 26px; font-weight: 900; color: #b3261e; margin: 6px 0 0; }
 .card .goal-zh { font-size: 20px; color: var(--muted); }
+.card .climb-what { font-size: 22px; font-weight: 900; color: #2f6f5a; margin: 4px 0 0; }
+.card .climb-what .zh { font-size: 18px; color: var(--muted); font-weight: 700; margin-left: 4px; }
 .card .example { display: inline-block; margin-top: 8px; padding: 4px 16px; border-radius: 12px; background: #fff1e0; font-size: 28px; font-weight: 900; color: #7a3b1a; }
 .card .hint { font-size: 17px; color: var(--muted); line-height: 1.5; }
 .card .how { display: flex; justify-content: center; gap: 18px; margin: 14px 0 4px; }
@@ -261,6 +263,7 @@ html.lay-portrait .card, html.lay-landscape .card {
 html.lay-portrait .card h1 { font-size: 27px; }
 html.lay-portrait .card h2 { font-size: 23px; }
 html.lay-portrait .card .goal { font-size: 22px; }
+html.lay-portrait .card .climb-what { font-size: 19px; }
 html.lay-portrait .card .example { font-size: 26px; }
 html.lay-portrait .card .stars-row { font-size: 44px; letter-spacing: 4px; }
 html.lay-portrait .card .praise { font-size: 25px; }
@@ -272,6 +275,7 @@ html.lay-landscape .card h1 { font-size: 23px; margin-bottom: 2px; }
 html.lay-landscape .card h2 { font-size: 20px; margin-bottom: 2px; }
 html.lay-landscape .card .goal { font-size: 19px; }
 html.lay-landscape .card .goal-zh { font-size: 16px; }
+html.lay-landscape .card .climb-what { font-size: 16px; margin: 0; }
 html.lay-landscape .card .example { font-size: 21px; margin-top: 4px; }
 html.lay-landscape .card .how { margin: 6px 0 2px; }
 html.lay-landscape .card p { font-size: 16px; margin: 4px 0; }
