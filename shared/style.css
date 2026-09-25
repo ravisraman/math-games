@@ -25,6 +25,25 @@ html, body {
   font-family: var(--font);
 }
 
+/* Phone-friendly: no double-tap zoom, no rubber-band scrolling, no text selection while playing. */
+html {
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+body {
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+input, textarea { -webkit-user-select: text; user-select: text; }
+
+/* Show keyboard hints on laptops and touch hints on phones. */
+html.touch .keys-only { display: none !important; }
+html.no-touch .touch-only { display: none !important; }
+
 button {
   font: inherit;
   cursor: pointer;

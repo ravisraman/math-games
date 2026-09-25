@@ -145,6 +145,13 @@
       if (ctx.state === 'suspended') ctx.resume();
       if (!this.unlocked) {
         this.unlocked = true;
+        // iOS Safari only fully unlocks audio after something is played inside a touch/click.
+        try {
+          const src = ctx.createBufferSource();
+          src.buffer = ctx.createBuffer(1, 1, 22050);
+          src.connect(ctx.destination);
+          src.start(0);
+        } catch (e) { /* ignore */ }
         Music._startIfWanted();
       }
     },
@@ -521,7 +528,28 @@
   };
 
   // Browsers only allow sound after the first key press or click.
-  ['keydown', 'pointerdown'].forEach((type) => window.addEventListener(type, () => Audio.unlock(), { capture: true }));
+  ['keydown', 'pointerdown', 'touchend', 'click'].forEach((type) => window.addEventListener(type, () => Audio.unlock(), { capture: true }));
+
+  // ---------- Device: phones/tablets get touch controls; laptops keep the keyboard ----------
+  const isTouch = (() => {
+    try {
+      return window.matchMedia('(pointer: coarse)').matches || (navigator.maxTouchPoints > 0 && !window.matchMedia('(pointer: fine)').matches);
+    } catch (e) {
+      return false;
+    }
+  })();
+  document.documentElement.classList.add(isTouch ? 'touch' : 'no-touch');
+  const isStandalone = !!(window.navigator.standalone || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches));
+  if (isStandalone) document.documentElement.classList.add('standalone');
+
+  // Offline support + "Add to Home Screen" app: a network-first service worker at the site root.
+  try {
+    const here = document.currentScript && document.currentScript.src;
+    if (here && 'serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+      const swUrl = new URL('../sw.js', here);
+      window.addEventListener('load', () => navigator.serviceWorker.register(swUrl.href, { scope: new URL('../', here).pathname }).catch(() => {}));
+    }
+  } catch (e) { /* ignore */ }
   document.addEventListener('visibilitychange', () => {
     if (!Audio.ctx) return;
     if (document.hidden) Audio.ctx.suspend();
@@ -649,6 +677,6 @@
     HEROES, load, save, exportFile, importText, reset, unlockedHeroes,
     Audio, Sound, Music, Voice, applySettings,
     cents, dollars, money, moneyWords, zhNumber, zhMoney,
-    PRAISE, CHEER, pick, escapeHtml,
+    PRAISE, CHEER, pick, escapeHtml, isTouch, isStandalone,
   };
 })();
