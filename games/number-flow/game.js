@@ -61,7 +61,12 @@
     { n: 7, pairs: 5, lo: 3, hi: 9, len: [4, 7], minT: 26, maxT: 66, tens: [10, 20], tenP: 0.3, cap: 3, near: 3 }, // 13+
   ];
   function configFor(L) {
-    return Object.assign({}, LEVELS[Math.max(1, Math.min(LEVELS.length - 1, L))]);
+    const cfg = Object.assign({}, LEVELS[Math.max(1, Math.min(LEVELS.length - 1, L))]);
+    // Training wheels: at levels 1-2 the running total shows while he draws. From level 3 he
+    // adds in his head: the path shows "8 + 2 + 5 = ?" and the total is only shown (and
+    // graded) when the path reaches the other dot.
+    cfg.liveSum = L <= 2;
+    return cfg;
   }
 
   // ---------- Helpers ----------
@@ -322,14 +327,28 @@
   const kb = (keys, touch) => (keyMode ? keys : touch);
   let ping = null; // rings on a dot ("start here!") after tapping an empty cell
   let everDragged = false; // the 👆 demo hand shows until he first drags a path with a finger
+  // Hints (per puzzle, not saved): hintSeen[p] = the numbers of pair p's route a hint has shown.
+  // A hint shows at most half of a route, and there is a short wait between hints.
+  const HINT_WAIT = 10; // seconds of play between two hints
+  let hintSeen = [];
+  let lastHintAt = -Infinity; // stats.seconds when the last hint was given
+  let toldHead = false; // "add them up in your head!" has been spoken this puzzle
+  // Running total on show while drawing? (levels 1-2 only — see configFor)
+  const live = () => puzzle.cfg.liveSum !== false;
 
   function newPuzzle() {
     puzzle = generate(g.level);
+    // (A very crowded board can fall back to an easier level's board: keep his level's rule.)
+    puzzle.cfg.liveSum = configFor(g.level).liveSum;
     paths = puzzle.pairs.map(() => []);
     drawing = -1;
     active = 0;
     firstArrival = puzzle.pairs.map(() => true);
     stats = { hints: 0, resets: 0, wrongs: 0, undos: 0, seconds: 0 };
+    hintSeen = puzzle.pairs.map(() => new Set());
+    lastHintAt = -Infinity;
+    toldHead = false;
+    doneGrab = null;
     computeGeo();
     cursor = puzzle.pairs[0].a;
     particles = []; floaters = []; lanterns = []; shimmers = [];
@@ -461,9 +480,13 @@
   }
 
   // Notes climb a C-major pentatonic scale as the running sum gets closer to the target.
+  // With the running total hidden (level 3+) they just climb with each number, so the music
+  // doesn't give away how close he is.
   const PENTA = [0, 2, 4, 7, 9];
   function noteFor(p) {
-    const k = Math.max(0, Math.min(11, Math.round((sumOf(p) / puzzle.pairs[p].target) * 9)));
+    const k = live()
+      ? Math.max(0, Math.min(11, Math.round((sumOf(p) / puzzle.pairs[p].target) * 9)))
+      : Math.min(9, terms(p).length * 2);
     return 60 + PENTA[k % 5] + 12 * Math.floor(k / 5);
   }
 
@@ -473,7 +496,14 @@
     const s = sumOf(p);
     const t = terms(p);
     if (!t.length) say(`${pr.color.emoji} Make ${pr.target}! Walk to the other ${pr.color.emoji} dot.`);
-    else if (s > pr.target) {
+    else if (!live()) {
+      // He adds in his head: only the numbers, no total, no "too much", no 🎯. The dot grades it.
+      say(`${pr.color.emoji} ${t.join(' + ')} = ? Add them up! Make ${pr.target}, then go to the other ${pr.color.emoji}.`);
+      if (forward && !toldHead) {
+        toldHead = true;
+        MQ.Voice.say('Add them up in your head!', 'en-US');
+      }
+    } else if (s > pr.target) {
       if (forward) MQ.Sound.note(50, 'harp', { delay: 0.12, dur: 0.6, vel: 0.1 });
       if (forward && s - t[t.length - 1] <= pr.target) MQ.Voice.say(`${s}. Too much!`, 'en-US', { interrupt: true });
       say(`${t.join(' + ')} = ${s}. That's more than ${pr.target}! Step back ↩ and try another way.`);
@@ -543,6 +573,11 @@
   }
 
   // ---------- Hint: reveal the next cell of one unfinished path ----------
+  // A hint shows at most half the numbers of a route (from either end), so he always finds and
+  // adds the rest himself, and hints come at most every HINT_WAIT seconds.
+  const hintCap = (p) => Math.max(1, Math.floor((puzzle.pairs[p].sol.length - 2) / 2));
+  const hintWait = () => Math.max(0, Math.ceil(HINT_WAIT - (stats.seconds - lastHintAt)));
+
   function hint() {
     let p = drawing >= 0 && !isCorrect(drawing) ? drawing : -1;
     if (p < 0 && !isCorrect(active)) p = active;
@@ -554,6 +589,24 @@
     let k = 0;
     while (k < P.length && P[k] === S[k]) k++;
     const next = S.slice(0, Math.max(1, k) + 1);
+    const shown = next[next.length - 1];
+    const isNum = puzzle.cells[shown].pair < 0;
+    if (hintSeen[p].size >= hintCap(p) && !(isNum && hintSeen[p].has(shown))) {
+      // Half the route is shown already: the rest is his to find (and add).
+      MQ.Sound.note(64, 'bell', { dur: 0.5, vel: 0.1 });
+      say(`💪 You can do the rest — add them up! ${pr.color.emoji} Make ${pr.target}.`);
+      MQ.Voice.say(`You can do the rest. Add them up! Make ${pr.target}.`, 'en-US', { interrupt: true });
+      return;
+    }
+    const wait = hintWait();
+    if (wait > 0) {
+      MQ.Sound.note(55, 'wood', { dur: 0.12, vel: 0.25 });
+      say(`🤔 Try it yourself first! Another hint in ${wait} second${wait === 1 ? '' : 's'}.`);
+      MQ.Voice.say('Try it yourself first! Another hint soon.', 'en-US', { interrupt: true });
+      return;
+    }
+    if (isNum) hintSeen[p].add(shown);
+    lastHintAt = stats.seconds;
     // Anything else sitting on those cells gets trimmed back so the hint path fits.
     let moved = false;
     paths.forEach((Q, q) => {
@@ -573,7 +626,18 @@
     if (h === partnerOf(p, next[0])) { arrive(p); return; }
     const num = puzzle.cells[h].num;
     say(`💡 Try going through the ${num} next! ${moved ? '(I moved another path out of the way.) ' : ''}${kb('Keep going with the arrows.', 'Drag on from the end of the path.')}`);
+    MQ.Voice.say(`Try the ${num} next!`, 'en-US', { interrupt: true });
     updateHud();
+  }
+
+  // The 💡 button rests (dimmed, with a countdown) between hints.
+  let hintBtnShown = null;
+  function updateHintBtn() {
+    const wait = state === 'play' && puzzle ? hintWait() : 0;
+    if (wait === hintBtnShown) return;
+    hintBtnShown = wait;
+    el('btn-hint').classList.toggle('cool', wait > 0);
+    el('hint-tl').textContent = wait > 0 ? `Hint in ${wait}` : 'Hint';
   }
 
   // ---------- HUD ----------
@@ -588,6 +652,7 @@
       const s = sumOf(p);
       let cls = 'chip', status;
       if (isCorrect(p)) { cls += ' done'; status = '✅'; }
+      else if (terms(p).length && !live()) status = '…'; // level 3+: no running total
       else if (terms(p).length) { status = `${s}`; if (s > pr.target) cls += ' over'; }
       else status = '·';
       if (p === active) cls += ' active';
@@ -602,13 +667,18 @@
     const box = el('sum-box');
     const sent = el('sentence');
     const need = el('need');
-    box.classList.toggle('good', s === pr.target && t.length > 0);
-    box.classList.toggle('over', s > pr.target);
+    // Level 3+: the total is only shown once the path has reached the other dot.
+    const reveal = live() || isComplete(p);
+    box.classList.toggle('good', reveal && s === pr.target && t.length > 0);
+    box.classList.toggle('over', reveal && s > pr.target);
     need.className = 'need';
     sent.classList.toggle('long', t.length > 3 || s >= 100);
     if (!t.length) {
       sent.innerHTML = `${dotHtml(pr, true)} <span class="eq">make</span> ${pr.target}`;
       need.textContent = paths[p].length ? 'Walk to a number ➜' : kb('Press space on a dot to start', '👆 Drag from a dot to start');
+    } else if (!reveal) {
+      sent.innerHTML = `${t.join(' + ')} <span class="eq">=</span> <span class="total">?</span>`;
+      need.textContent = `Add them up! Make ${pr.target}.`;
     } else {
       sent.innerHTML = `${t.join(' + ')} <span class="eq">=</span> <span class="total">${s}</span>`;
       if (isCorrect(p)) { need.textContent = `✅ Exactly ${pr.target}!`; need.classList.add('done'); }
@@ -617,7 +687,7 @@
       else need.textContent = `Need ${pr.target - s} more to make ${pr.target}`;
     }
     el('sentence-zh').hidden = !data.settings.chinese;
-    el('sentence-zh').textContent = t.length && data.settings.chinese ? `${t.map((v) => MQ.zhNumber(v)).join(' 加 ')} 等于 ${MQ.zhNumber(s)}` : '';
+    el('sentence-zh').textContent = t.length && data.settings.chinese ? `${t.map((v) => MQ.zhNumber(v)).join(' 加 ')} 等于 ${reveal ? MQ.zhNumber(s) : '几？'}` : '';
   }
 
   function say(text, { speak = false } = {}) {
@@ -740,6 +810,9 @@
   let pointerKind = 'mouse';
   let fingerPt = null; // board coords of the finger while dragging (for the sum bubble)
   let blocked = { head: -1, cells: new Set() }; // blocked moves already complained about
+  // Press on a finished ✅ pair: nothing changes until the finger/mouse really drags out of the
+  // touched cell (then that pair is re-drawn, as before). A plain tap just says it's done.
+  let doneGrab = null; // { p, i, cell, pt }
   function boardPos(ev) {
     const rect = canvas.getBoundingClientRect();
     return { x: ((ev.clientX - rect.left) / rect.width) * W, y: ((ev.clientY - rect.top) / rect.height) * H };
@@ -769,7 +842,8 @@
     const touchy = pointerKind !== 'mouse';
     if (touchy && keyMode && MQ.isTouch) { keyMode = false; }
     const pt = boardPos(ev);
-    let i = cellAtPos(pt);
+    const touched = cellAtPos(pt);
+    let i = touched;
     if (touchy && !grabbable(i)) {
       const j = nearestGrabbable(pt, geo.cell * 0.7);
       if (j >= 0) i = j;
@@ -779,7 +853,15 @@
     if (drawing >= 0) release(false);
     cursor = i;
     blocked = { head: -1, cells: new Set() };
-    if (grabbable(i)) {
+    doneGrab = null;
+    const owner = grabbable(i) ? occupant(i) : -1;
+    if (owner >= 0 && isCorrect(owner)) {
+      // A finished ✅ dot or path: don't wreck it on a tap — wait and see if he drags.
+      doneGrab = { p: owner, i, cell: touched, pt };
+      pointerDrawing = false;
+      fingerPt = null;
+      try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
+    } else if (grabbable(i)) {
       pressCell(i, true);
       pointerDrawing = drawing >= 0;
       fingerPt = pt;

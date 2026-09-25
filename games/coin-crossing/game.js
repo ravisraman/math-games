@@ -99,7 +99,12 @@
     c.maxCars = L <= 2 ? 2 : L <= 11 ? 3 : 4;
     c.buses = L >= 5;
     c.extras = Math.min(3 + Math.floor(L / 3), 7);
-    c.showNeed = L <= 4;
+    // Levels 1-2 are training wheels: "Need N more" is shown, a coin that would go over is
+    // refused, and the gate opens by itself at the exact amount. From level 3 he does the
+    // adding: every coin goes in the pouch (it can go over) and the gate judges him only when
+    // he hops in. "Need N more" comes back as help after 2 wrong tries at the gate.
+    c.judge = L >= 3;
+    c.showNeed = !c.judge;
     return c;
   }
 
@@ -157,8 +162,16 @@
   let queuedMove = null;
   let lastSaveAt = 0;
   let gateLift = 0; // 0 = portcullis down, 1 = fully raised
+  let gateUnlocked = false; // level 3+: the gate opens only once he walks in with the exact amount
+  let gateCooldown = 0; // level 3+: a moment after a wrong try before the gate listens again
+  const WRONG_TRIES_FOR_HELP = 2;
 
   function total() { return pouch.reduce((s, c) => s + c.v, 0); }
+  // Is the gate open (drawn raised and golden)? Levels 1-2: as soon as the amount is exact.
+  // Level 3+: never while he is still collecting, so it can't tell him when he's done.
+  function gateOpen() { return cfg.judge ? gateUnlocked : total() === target; }
+  // Level 3+: has he earned the "Need N more" / "put a coin back" help yet?
+  const helpOn = () => !cfg.judge || stats.wrongGate >= WRONG_TRIES_FOR_HELP;
 
   function newLevel() {
     cfg = configFor(g.level);
@@ -174,7 +187,8 @@
     }
 
     pouch = [];
-    stats = { overshoots: 0, bonks: 0, putBacks: 0, seconds: 0 };
+    // wrongGate (level 3+) is for this round's stars only; it is not saved.
+    stats = { overshoots: 0, bonks: 0, putBacks: 0, wrongGate: 0, seconds: 0 };
     needRevealed = cfg.showNeed;
     buildBoard();
   }
@@ -221,6 +235,8 @@
     bgCanvas = null;
     initAmbient();
     gateLift = 0;
+    gateUnlocked = false;
+    gateCooldown = 0;
     particles = [];
     floaters = [];
     queuedMove = null;
@@ -264,16 +280,29 @@
     el('pouch-zh').textContent = data.settings.chinese ? MQ.zhMoney(t) : '';
     el('pouch-coins').innerHTML = pouch.map((c) => coinChip(c.v)).join('');
     const need = el('need');
-    need.classList.toggle('done', t === target);
-    if (t === target) need.textContent = '✅ Exactly right! Hop to the castle ⬆';
-    else if (needRevealed) need.textContent = `Need ${MQ.money(target - t, targetFmt)} more`;
-    else need.textContent = 'How much more do you need? 🤔';
-    // Compact copy for the phone HUD (next to the target).
-    const need2 = el('need2');
-    need2.classList.toggle('done', t === target);
-    if (t === target) need2.textContent = '✅ Exactly! ⬆';
-    else if (needRevealed) need2.textContent = `Need ${MQ.money(target - t, targetFmt)} more`;
-    else need2.textContent = 'Need ? more 🤔';
+    const need2 = el('need2'); // compact copy for the phone HUD (next to the target)
+    if (cfg.judge) {
+      // Level 3+: no live "you're done" cue. Neutral until he has earned the help.
+      need.classList.remove('done');
+      need2.classList.remove('done');
+      if (!needRevealed) {
+        need.textContent = `Hop into the castle 🏰 when you think you have exactly ${MQ.money(target, targetFmt)}`;
+        need2.textContent = 'Then hop in 🏰';
+      } else if (t > target) {
+        need.textContent = need2.textContent = `${MQ.money(t - target, targetFmt)} too many`;
+      } else {
+        need.textContent = need2.textContent = `Need ${MQ.money(target - t, targetFmt)} more`;
+      }
+    } else {
+      need.classList.toggle('done', t === target);
+      if (t === target) need.textContent = '✅ Exactly right! Hop to the castle ⬆';
+      else if (needRevealed) need.textContent = `Need ${MQ.money(target - t, targetFmt)} more`;
+      else need.textContent = 'How much more do you need? 🤔';
+      need2.classList.toggle('done', t === target);
+      if (t === target) need2.textContent = '✅ Exactly! ⬆';
+      else if (needRevealed) need2.textContent = `Need ${MQ.money(target - t, targetFmt)} more`;
+      else need2.textContent = 'Need ? more 🤔';
+    }
     el('btn-back').classList.toggle('empty', pouch.length === 0);
   }
 
@@ -295,6 +324,8 @@
   let usedTouch = MQ.isTouch;
   const touchUI = () => usedTouch || layout !== 'desk';
   const PUT_BACK = () => (touchUI() ? 'Tap ↩ Put back' : 'Press SPACE');
+  // Read something aloud in plain words (money as "86 cents", not "86¢").
+  const speak = (text) => MQ.Voice.say(text, 'en-US', { interrupt: true });
 
   // ---------- Input ----------
   const DIRS = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
@@ -328,11 +359,20 @@
     b.classList.toggle('off', !on);
   }
 
-  // ---------- Touch: tap = hop up, tap a neighbor cell = hop there, swipe = hop that way ----------
+  // ---------- Touch: tap a cell = hop one step toward it, swipe = hop that way ----------
   const wrap = el('stage-wrap');
   let touch = null; // the one finger we are following
   let ripples = [];
   const SWIPE = 26; // CSS px before a drag counts as a swipe
+  // Right after Start (or Keep playing) the board ignores taps for a moment, so the second
+  // tap of an excited double-tap doesn't hop the hero (maybe into a car).
+  const QUIET_MS = 400;
+  let boardQuietUntil = 0;
+  function resumePlay() {
+    hideOverlay();
+    state = 'play';
+    boardQuietUntil = performance.now() + QUIET_MS;
+  }
 
   function boardPoint(e) {
     const rect = canvas.getBoundingClientRect();
@@ -354,6 +394,7 @@
     if (e.pointerType !== 'mouse') usedTouch = true;
     if (touch || state !== 'play') return;
     e.preventDefault();
+    if (performance.now() < boardQuietUntil) return;
     MQ.Sound.ensure();
     touch = { id: e.pointerId, x: e.clientX, y: e.clientY, done: false };
     try { wrap.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
@@ -373,13 +414,24 @@
     touch = null;
     if (t.done || state !== 'play' || e.type === 'pointercancel') return;
     const p = boardPoint(e);
+    // Which cell was tapped (not clamped, so a tap just off the board still has a direction)?
+    const r = p.y < CASTLE_H ? BANK_ROW : 1 + Math.floor((p.y - CASTLE_H) / CELL);
+    const c = Math.floor(p.x / CELL);
+    const dr = r - player.r;
+    const dc = c - player.c;
+    if (dr === 0 && dc === 0) return; // tapped the hero itself: stay put
     ripples.push({ x: p.x, y: p.y, life: 1 });
-    // Tapped right next to the hero? Hop there. Anywhere else: hop forward.
-    const cell = cellAt(p.x, p.y);
-    const dr = cell.r - player.r;
-    const dc = cell.c - player.c;
-    if (p.inside && Math.abs(dr) + Math.abs(dc) === 1 && !(cell.r === BANK_ROW && dr !== -1)) touchMove(dr, dc);
-    else touchMove(-1, 0);
+    // The castle spans the whole top row, so the step toward it is always up.
+    if (r === BANK_ROW) { touchMove(-1, 0); return; }
+    // Next to the hero: hop there. Farther away (a coin he wants): ONE hop toward it,
+    // along whichever way is farther (a diagonal tie goes by where the finger landed).
+    let upDown = Math.abs(dr) > Math.abs(dc);
+    if (Math.abs(dr) === Math.abs(dc)) {
+      const h = cellCenter(player.r, player.c);
+      upDown = Math.abs(p.y - h.y) > Math.abs(p.x - h.x);
+    }
+    if (upDown) touchMove(Math.sign(dr), 0);
+    else touchMove(0, Math.sign(dc));
   };
   wrap.addEventListener('pointerup', endTouch);
   wrap.addEventListener('pointercancel', endTouch);
@@ -396,7 +448,7 @@
   onTap('btn-back', () => { if (state === 'play') putBack(); });
   onTap('btn-pause', () => {
     if (state === 'play') showPause();
-    else if (state === 'pause') { hideOverlay(); state = 'play'; }
+    else if (state === 'pause') resumePlay();
   });
   onTap('btn-music', toggleMusic);
 
@@ -420,7 +472,9 @@
     const nr = player.r + dr;
     const nc = player.c + dc;
     if (nc < 0 || nc >= COLS || nr > START_ROW || nr < BANK_ROW) return;
-    if (nr === BANK_ROW && total() !== target) {
+    // Level 3+: he may always hop up to the gate; it judges the pouch when he gets there.
+    if (nr === BANK_ROW && cfg.judge && time < gateCooldown) return;
+    if (nr === BANK_ROW && !cfg.judge && total() !== target) {
       MQ.Sound.nope();
       const t = total();
       if (t === 0) say('The castle is locked 🔒. Collect coins first!');
@@ -433,6 +487,7 @@
     player.r = nr;
     player.c = nc;
     player.t = 0;
+    player.bounce = false;
     MQ.Sound.hop(START_ROW - Math.max(nr, 1), dr === 0);
   }
 
@@ -442,15 +497,65 @@
     for (let i = 0; i < 6; i++) {
       particles.push({ x: pos.x + (Math.random() - 0.5) * 20, y: pos.y + 20, vx: (Math.random() - 0.5) * 60, vy: -20 - Math.random() * 30, life: 0.4, color: 'rgba(255,255,255,0.8)', size: 3 + Math.random() * 3, dust: true });
     }
-    if (player.r === BANK_ROW) { win(); return; }
-    const coin = coins.find((c) => !c.taken && !c.fly && c.r === player.r && c.c === player.c);
+    if (player.r === BANK_ROW) {
+      if (!cfg.judge || total() === target) win();
+      else notYet();
+      return;
+    }
+    const bounced = player.bounce;
+    player.bounce = false;
+    const coin = !bounced && coins.find((c) => !c.taken && !c.fly && c.r === player.r && c.c === player.c);
     if (coin) touchCoin(coin);
     if (queuedMove) { const m = queuedMove; queuedMove = null; tryMove(...m); }
+  }
+
+  // Level 3+: he hopped into the castle without the exact amount. Kindly bounce him back one
+  // row and tell him (aloud too) what he has and what the castle needs, so he can work it out.
+  function notYet() {
+    const t = total();
+    MQ.Sound.nope();
+    queuedMove = null;
+    player.fromR = BANK_ROW;
+    player.fromC = player.c;
+    player.r = BANK_ROW + 1;
+    player.t = 0;
+    player.bounce = true; // don't grab a coin on the way back down
+    gateCooldown = time + 0.8;
+    const { x, y } = cellCenter(BANK_ROW, player.c);
+    floaters.push({ x, y: y - 24, text: 'Not yet!', life: 1.2, color: '#e07b00' });
+    if (t === 0) {
+      // Nothing in the pouch is not a wrong answer, just a reminder.
+      say(`Collect coins first! The castle needs ${MQ.money(target, targetFmt)}.`);
+      speak(`Collect some coins first! The castle needs ${MQ.moneyWords(target)}.`);
+      return;
+    }
+    stats.wrongGate++;
+    if (stats.wrongGate >= WRONG_TRIES_FOR_HELP) needRevealed = true;
+    updateHud();
+    let text = `Not yet! You have ${MQ.money(t, pouchFmt)}. The castle needs ${MQ.money(target, targetFmt)}.`;
+    let words = `Not yet! You have ${MQ.moneyWords(t)}. The castle needs ${MQ.moneyWords(target)}.`;
+    if (!helpOn()) {
+      text += ' 🤔';
+    } else if (t > target) {
+      text += ` That's ${MQ.money(t - target, targetFmt)} too many. ${PUT_BACK()} to put a coin back.`;
+      words += ` That's ${MQ.moneyWords(t - target)} too many. Put a coin back.`;
+    } else {
+      const left = coins.filter((c) => !c.taken).map((c) => c.v);
+      text += ` You need ${MQ.money(target - t, targetFmt)} more.`;
+      words += ` You need ${MQ.moneyWords(target - t)} more.`;
+      if (!canMake(target - t, left)) {
+        text += ` The coins left can't make that — ${PUT_BACK()} to put a coin back.`;
+        words += ' The coins left can\'t make that. Put a coin back.';
+      }
+    }
+    say(text);
+    speak(words);
   }
 
   function touchCoin(coin) {
     const t = total();
     const name = COINS[coin.v].name;
+    if (cfg.judge) { takeCoin(coin); return; }
     if (t === target) {
       say(`You already have exactly ${MQ.money(t, pouchFmt)}! Hop up to the castle ⬆`);
       return;
