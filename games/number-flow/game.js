@@ -9,6 +9,7 @@
   const H = 800;
   const PAD = 26;
   const MAX_CELL = 172;
+  const ZH_FONT = '"PingFang SC","Hiragino Sans GB","Noto Sans SC","Noto Sans CJK SC","Heiti SC",sans-serif';
   const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
   const STEP_TIME = 0.09; // seconds for a path segment to "grow" into the next cell
 
@@ -1046,21 +1047,22 @@
     if (stats.hints > 1) setTimeout(() => MQ.Voice.say('Hints help you learn! Next time, try adding more of them up yourself.', 'en-US'), 900);
     const starHtml = [1, 2, 3].map((i) => `<span class="${i <= stars ? '' : 'off'}">⭐</span>`).join('');
     const sums = puzzle.pairs.map((pr, p) => `<div>${dotHtml(pr, true)} ${terms(p).join(' + ')} = ${sumOf(p)}</div>`).join('');
+    const moveShort = { up: '⬆️ Level up!', down: '🌱 Easier one next', same: '🔁 Go for ⭐⭐⭐!' }[move.kind];
+    setTimeout(() => MQ.Voice.say(move.text, 'en-US'), 400);
     showOverlay(`
       <div class="card">
-        <h2>Puzzle solved! 🎉</h2>
+        <h2>Solved! 🎉</h2>
         <div class="stars-row">${starHtml}</div>
         <div class="praise"><span class="zh">${praise.zh}</span><small>${praise.py} · ${praise.en}</small></div>
         <div class="sums">${sums}</div>
         <div class="stats">
-          <span>🧩 Level ${level} · ${puzzle.n}×${puzzle.n}</span>
-          <span>💡 ${stats.hints} hint${stats.hints === 1 ? '' : 's'}</span>
-          <span>🔄 ${stats.resets} restart${stats.resets === 1 ? '' : 's'}</span>
+          <span>🧩 ${level}</span>
+          <span>💡 ${stats.hints}</span>
+          <span>🔄 ${stats.resets}</span>
         </div>
-        ${stats.hints > 1 ? '<div class="next">💡 Hints help you learn! Next time, try adding more of them up yourself — that gets more ⭐.</div>' : ''}
-        <div class="next">${move.text}</div>
-        ${newHero ? `<div class="next">🎉 New hero unlocked: ${newHero.emoji} ${newHero.name}! Pick it in the portal.</div>` : ''}
-        <div class="press keys-only">Press <span class="key">return</span> for the next puzzle</div>
+        <div class="next">${moveShort}</div>
+        ${newHero ? `<div class="next">🎉 New hero: ${newHero.emoji} ${newHero.name}!</div>` : ''}
+        <div class="press keys-only">Press <span class="key">return</span> ▶</div>
         <button class="btn go touch-only" type="button">Next ▶</button>
       </div>`,
       (k) => { if (k === 'Enter' || k === ' ') nextPuzzle(); }
@@ -1113,23 +1115,22 @@
     state = 'intro';
     const first = g.played === 0;
     const targets = puzzle.pairs.map((pr) => `<div>${dotHtml(pr)}${zh(pr.target) ? `<span class="zhn zh">${zh(pr.target)}</span>` : ''}</div>`).join('');
-    const demo = `
-      <div class="demo">
-        <figure class="no">${demoBoard([0, 1, 2])}<figcaption>5 ✗ <small>not 7</small></figcaption></figure>
-        <figure class="yes">${demoBoard([0, 3, 4, 5, 2])}<figcaption>3 + 1 + 3 = 7 ✅</figcaption></figure>
-      </div>
-      <div class="demo-tip">The short way is usually wrong.<br><b>Add up</b> the numbers and go around!</div>`;
+    // Picture rows only (the rules are spoken). Levels 1-2 / first game: the little demo board.
+    const demo = first || g.level <= 2
+      ? `<div class="demo">
+          <figure class="no">${demoBoard([0, 1, 2])}<figcaption>5 ✗</figcaption></figure>
+          <figure class="yes">${demoBoard([0, 3, 4, 5, 2])}<figcaption>3+1+3 = 7 ✅</figcaption></figure>
+        </div>`
+      : '<div class="row">↪️ Go around, add up!</div>';
     showOverlay(`
-      <div class="card">
+      <div class="card intro">
         <h1>🧩 Level ${g.level}</h1>
-        <p>Connect each pair of dots.<br>The numbers on your path must <b>add up</b> to the dot!</p>
-        ${first || g.level <= 2 ? demo : '<p class="hint">🤔 The short way is usually wrong — add up and go around!</p>'}
+        <div class="goal">🎯 Make</div>
         <div class="targets">${targets}</div>
-        ${live() ? '' : '<p class="hint">🧠 Add them up in your head! The total shows when you reach the other dot.</p>'}
-        ${first ? `<p class="hint keys-only">Move with the arrows. Press <span class="key">space</span> on a dot, then walk to its twin.<br>Step back to undo. Stuck? Press <span class="key">H</span> for a hint.</p>` : ''}
-        ${first ? `<p class="hint touch-only">👆 Put your finger on a dot and drag to its twin.<br>Slide back to undo. Stuck? Tap 💡 Hint.</p>` : ''}
-        <div class="press keys-only">Press <span class="key">return</span> to start</div>
-        <button class="btn go touch-only" type="button">Start ▶</button>
+        ${demo}
+        ${live() ? '' : '<div class="row">🧠 Add in your head!</div>'}
+        <div class="press keys-only">Press <span class="key">return</span> ▶</div>
+        <button class="btn go touch-only" type="button">▶ Start</button>
       </div>`,
       (k) => { if (k === 'Enter' || k === ' ') startPlay(); }
     );
@@ -1137,7 +1138,9 @@
     const list = puzzle.pairs.map((pr) => pr.target);
     const spoken = list.length === 2 ? `${list[0]} and ${list[1]}` : `${list.slice(0, -1).join(', ')}, and ${list[list.length - 1]}`;
     const rules = g.played < 3 ? ' Draw a path from a dot to the dot with the same color. The numbers on your path must add up to the number on the dot. The short way usually won\'t work, so add up the numbers and go around!' : '';
-    MQ.Voice.say(`Level ${g.level}.${rules} Make ${spoken}.`, 'en-US', { interrupt: true });
+    const head = live() ? '' : ' Add them up in your head! The total shows when you reach the other dot.';
+    const how = first ? kb(' Press space on a dot, then walk to its twin. Step back to undo. Stuck? Press H for a hint.', ' Put your finger on a dot and drag to its twin. Slide back to undo. Stuck? Tap Hint.') : '';
+    MQ.Voice.say(`Level ${g.level}.${rules} Make ${spoken}.${head}${how}`, 'en-US', { interrupt: true });
     if (data.settings.chinese) MQ.Voice.say(list.map((v) => MQ.zhNumber(v)).join(','), 'zh-CN');
     say('Connect each pair of dots. Add up the numbers on the way!');
   }
@@ -1445,13 +1448,24 @@
         const z = zh(pr.target);
         const big = pr.target >= 10;
         ctx.fillStyle = pr.color.ink;
-        ctx.font = `900 ${Math.round(cell * (big ? 0.3 : 0.34))}px ${UI_FONT}`;
-        ctx.fillText(String(pr.target), x, y - (z ? cell * 0.06 : 0) + cell * 0.01);
-        if (z) {
-          ctx.globalAlpha = 0.9;
-          ctx.font = `700 ${Math.round(cell * 0.12)}px "PingFang SC","Hiragino Sans GB","Noto Sans SC",sans-serif`;
-          ctx.fillText(z, x, y + cell * 0.19);
-          ctx.globalAlpha = 1;
+        if (!z) {
+          ctx.font = `900 ${Math.round(cell * (big ? 0.3 : 0.34))}px ${UI_FONT}`;
+          ctx.fillText(String(pr.target), x, y + cell * 0.01);
+        } else {
+          // Number on top, the Chinese underneath: big, bold, white with a dark outline.
+          ctx.font = `900 ${Math.round(cell * (big ? 0.26 : 0.29))}px ${UI_FONT}`;
+          ctx.fillText(String(pr.target), x, y - cell * 0.1);
+          let fz = cell * 0.22;
+          ctx.font = `900 ${Math.round(fz)}px ${ZH_FONT}`;
+          const tw = ctx.measureText(z).width;
+          if (tw > cell * 0.62) { fz *= (cell * 0.62) / tw; ctx.font = `900 ${Math.round(fz)}px ${ZH_FONT}`; }
+          const zy = y + cell * 0.16;
+          ctx.lineJoin = 'round';
+          ctx.lineWidth = Math.max(2.5, cell * 0.045);
+          ctx.strokeStyle = pr.color.dark;
+          ctx.strokeText(z, x, zy);
+          ctx.fillStyle = '#fff';
+          ctx.fillText(z, x, zy);
         }
         if (done) {
           ctx.font = `${Math.round(cell * 0.2)}px ${EMOJI_FONT}`;

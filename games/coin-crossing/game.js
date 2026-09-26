@@ -50,10 +50,12 @@
   const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
 
   const COINS = {
-    1: { name: 'penny', r: 15, hi: '#e7a36b', mid: '#c8793a', lo: '#8a4f1f', text: '#fff' },
-    5: { name: 'nickel', r: 18, hi: '#f1f3f5', mid: '#c3c7cc', lo: '#80868d', text: '#333' },
-    10: { name: 'dime', r: 13, hi: '#ffffff', mid: '#d3d7dc', lo: '#8f959c', text: '#333' },
-    25: { name: 'quarter', r: 21, hi: '#f4f5f6', mid: '#b8bdc3', lo: '#7b8188', text: '#333' },
+    // Radii are in board units (a cell is 64): big enough that the value reads at a glance.
+    // Sizes keep the real order (dime < penny < nickel < quarter) but readability wins.
+    1: { name: 'penny', r: 22.5, hi: '#f2b98a', mid: '#d08a4e', lo: '#8a4f1f', text: '#2a1200', halo: 'rgba(255,228,200,0.9)' },
+    5: { name: 'nickel', r: 23.5, hi: '#f4f6f8', mid: '#c9cdd2', lo: '#80868d', text: '#15181c', halo: 'rgba(255,255,255,0.95)' },
+    10: { name: 'dime', r: 22, hi: '#ffffff', mid: '#d6dade', lo: '#8f959c', text: '#15181c', halo: 'rgba(255,255,255,0.95)' },
+    25: { name: 'quarter', r: 25, hi: '#f6f7f8', mid: '#c0c5cb', lo: '#7b8188', text: '#15181c', halo: 'rgba(255,255,255,0.95)' },
     100: { name: 'dollar bill', bill: true, fill: '#a8d8a0', edge: '#2f6b2f', text: '#1f4d1f' },
     500: { name: 'five-dollar bill', bill: true, fill: '#c9c3e8', edge: '#4b3f8f', text: '#2f2766' },
   };
@@ -1429,7 +1431,7 @@
     ctx.translate(x, y);
     ctx.scale(scale, scale);
     ctx.fillStyle = 'rgba(0,0,0,0.18)';
-    ctx.beginPath(); ctx.ellipse(0, 22, 17, 5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0, k.bill ? 22 : k.r + 4, k.bill ? 17 : k.r * 0.8, 5, 0, 0, Math.PI * 2); ctx.fill();
     if (k.bill) {
       ctx.rotate(-0.06);
       roundRect(-25, -15, 50, 30, 5);
@@ -1463,10 +1465,32 @@
       }
       ctx.fillStyle = 'rgba(255,255,255,0.5)';
       ctx.beginPath(); ctx.ellipse(-k.r * 0.35, -k.r * 0.45, k.r * 0.35, k.r * 0.18, -0.6, 0, Math.PI * 2); ctx.fill();
+      // Value: a big bold number with a smaller ¢, dark on the metal with a light outline.
+      const num = String(v);
+      let size = v >= 10 ? 21 : 24;
+      ctx.font = `900 ${size}px ${UI_FONT}`;
+      let nw = ctx.measureText(num).width;
+      const cs = Math.round(size * 0.62);
+      ctx.font = `900 ${cs}px ${UI_FONT}`;
+      const cw = ctx.measureText('¢').width;
+      const maxW = k.r * 2 - 8;
+      if (nw + cw > maxW) { size = Math.floor(size * maxW / (nw + cw)); }
+      ctx.font = `900 ${size}px ${UI_FONT}`;
+      nw = ctx.measureText(num).width;
+      const c2 = Math.round(size * 0.62);
+      ctx.font = `900 ${c2}px ${UI_FONT}`;
+      const cw2 = ctx.measureText('¢').width;
+      const x0 = -(nw + cw2) / 2;
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = 3.5; ctx.strokeStyle = k.halo;
+      ctx.font = `900 ${size}px ${UI_FONT}`;
+      ctx.strokeText(num, x0, 1.5);
       ctx.fillStyle = k.text;
-      ctx.font = `900 ${v >= 10 ? 12 : 13}px ${UI_FONT}`;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(`${v}¢`, 0, 1);
+      ctx.fillText(num, x0, 1.5);
+      ctx.font = `900 ${c2}px ${UI_FONT}`;
+      ctx.strokeText('¢', x0 + nw, 3.5);
+      ctx.fillText('¢', x0 + nw, 3.5);
     }
     // Occasional twinkle
     const tw = Math.sin(time * 1.7 + seed * 3.1);
@@ -1474,7 +1498,7 @@
       const a = (tw - 0.93) / 0.07;
       ctx.globalAlpha = a;
       ctx.fillStyle = '#fff';
-      const sx = 10, sy = -12, L = 8 * a + 2;
+      const sx = k.bill ? 10 : k.r * 0.6, sy = k.bill ? -12 : -k.r * 0.7, L = 8 * a + 2;
       ctx.beginPath();
       ctx.moveTo(sx, sy - L); ctx.lineTo(sx + 2, sy - 2); ctx.lineTo(sx + L, sy); ctx.lineTo(sx + 2, sy + 2);
       ctx.lineTo(sx, sy + L); ctx.lineTo(sx - 2, sy + 2); ctx.lineTo(sx - L, sy); ctx.lineTo(sx - 2, sy - 2); ctx.closePath();

@@ -595,11 +595,11 @@
       g.struggles = 0;
     }
     g.maxLevel = Math.max(g.maxLevel || 1, g.level);
-    if (g.level > before + 1) return { text: `🚀 Perfect climb! You skip ahead two levels! Next: ${P.levelInfo(g.level).name}.`, kind: 'up2' };
-    if (g.level > before) return { text: `⬆ Level up! Next: ${P.levelInfo(g.level).name}.`, kind: 'up' };
-    if (g.level < before) return { text: "Let's practice some easier ones, then climb back up! 💪", kind: 'down' };
-    if (before === MAX_LEVEL && firstTry >= 9) return { text: "You're a tower master! 🏆", kind: 'up' };
-    return { text: 'Climb again! Get 9 first-try floors to level up.', kind: 'same' };
+    if (g.level > before + 1) return { text: `🚀 Skip ahead 2 levels!`, kind: 'up2' };
+    if (g.level > before) return { text: `⬆ Level ${g.level} next!`, kind: 'up' };
+    if (g.level < before) return { text: '💪 Easier ones next', kind: 'down' };
+    if (before === MAX_LEVEL && firstTry >= 9) return { text: '🏆 Tower master!', kind: 'up' };
+    return { text: '🎯 9 ✅ = level up', kind: 'same' };
   }
 
   function showResult() {
@@ -624,20 +624,20 @@
     const starHtml = [1, 2, 3].map((i) => `<span class="${i <= stars ? '' : 'off'}">⭐</span>`).join('');
     const practice = [...new Set(s.missedKeys)].slice(0, 4);
     showOverlay(`
-      <div class="card" data-enter>
-        <h2>${theme.emoji} You climbed the ${MQ.escapeHtml(theme.name)}!</h2>
+      <div class="card result" data-enter>
+        <h2>${theme.emoji} You reached the top!</h2>
         <div class="stars-row">${starHtml}</div>
         <div class="praise"><span class="zh">${praise.zh}</span><small>${praise.py} · ${praise.en}</small></div>
         <div class="stats">
-          <span>✅ ${s.firstTry} of 10 first try</span>
-          <span>⏱ ${avg.toFixed(1)} s each</span>
-          <span>✨ ${s.speedy} speedy</span>
+          <span title="first try">✅ ${s.firstTry}/10</span>
+          <span title="seconds each">⏱ ${avg.toFixed(1)}s</span>
+          <span title="speedy">✨ ${s.speedy}</span>
         </div>
-        ${practice.length ? `<p class="hint">Keep practicing: <b>${practice.map(MQ.escapeHtml).join(' · ')}</b></p>` : '<p class="hint">No wrong jumps at all! 🌟</p>'}
+        ${practice.length ? `<div class="practice">🔁 <b>${practice.map(MQ.escapeHtml).join(' · ')}</b></div>` : ''}
         <div class="next ${move.kind}">${move.text}</div>
-        ${newHero ? `<div class="next">🎉 New hero unlocked: ${newHero.emoji} ${newHero.name}! Pick it in the portal.</div>` : ''}
-        <div class="press keys-only">Press <span class="key">return</span> to climb again</div>
-        <button class="btn go touch-only">Climb again ▶</button>
+        ${newHero ? `<div class="next">🎉 New hero: ${newHero.emoji} ${MQ.escapeHtml(newHero.name)}!</div>` : ''}
+        <div class="press keys-only">Press <span class="key">return</span></div>
+        <button class="btn go touch-only">▶ Climb again</button>
       </div>`,
       (k) => { if (k === 'Enter') { MQ.Sound.click(); newClimb(); showIntro(); } }, true, 1500
     );
@@ -646,8 +646,8 @@
     const spoken = move.kind === 'up2' ? `${starWord}! Perfect climb! You jump up two levels!`
       : move.kind === 'up' ? (g.level > level ? `${starWord}! Level up!` : `${starWord}! You're a tower master!`)
       : move.kind === 'down' ? `${starWord}! Let's practice some easier ones.`
-      : `${starWord}! Climb again to level up.`;
-    MQ.Voice.say(spoken, 'en-US', { interrupt: false });
+      : `${starWord}! Get 9 right on the first try to level up.`;
+    MQ.Voice.say(`${spoken}${newHero ? ' You unlocked a new hero!' : ''}`, 'en-US', { interrupt: false });
   }
 
   // ---------- Overlays ----------
@@ -677,27 +677,26 @@
     const zh = data.settings.chinese ? `<div class="goal-zh zh">${lv.zh}</div>` : '';
     const ex = lv.example.includes('?') ? lv.example : `${lv.example} = ?`;
     showOverlay(`
-      <div class="card" data-enter>
-        <h1>${hero} Castle Climb</h1>
-        <div class="climb-what">Climb the ${MQ.escapeHtml(theme.name)}! ${theme.emoji} <span class="zh">${theme.zh}</span></div>
-        <div class="goal">Level ${g.level} · ${MQ.escapeHtml(lv.name)}</div>
+      <div class="card intro" data-enter>
+        <h1>${hero} Level ${g.level}</h1>
+        <div class="goal">${MQ.escapeHtml(lv.name)}</div>
         ${zh}
         <div class="example">${MQ.escapeHtml(ex)}</div>
-        <div class="how keys-only">
-          <div><span class="keys"><span class="key">←</span> <span class="key">→</span></span>walk under the answer</div>
-          <div><span class="keys"><span class="key">↑</span></span>jump up!</div>
+        <div class="pics">
+          <div><span class="ic">${theme.emoji}</span>10 floors to the top</div>
+          <div class="touch-only"><span class="ic">👆</span>Tap the answer</div>
+          <div class="keys-only"><span class="ic">⬆</span>Jump to the answer</div>
+          ${first ? '<div><span class="ic">🧱</span>Wrong? Just try again!</div>' : ''}
         </div>
-        <div class="how touch-only">
-          <div><span class="keys">👆</span>tap the right answer — you jump up!</div>
-        </div>
-        ${first ? `<p class="hint">Climb 10 floors to the top ${theme.emoji}<br>Wrong ledge? It crumbles — no problem, just try again!</p>` : `<p class="hint">Climb 10 floors to the top ${theme.emoji}</p>`}
-        <div class="press keys-only">Press <span class="key">return</span> to start</div>
-        <button class="btn go touch-only">Start ▶</button>
+        <div class="press keys-only">Press <span class="key">return</span></div>
+        <button class="btn go touch-only">▶ Start</button>
       </div>`,
       (k) => { if (k === 'Enter' || k === ' ') startPlay(); }
     );
-    if (first) MQ.Voice.say(touchUI() ? 'Welcome to Castle Climb! Tap the right answer to jump up!' : 'Welcome to Castle Climb! Walk under the right answer, then jump up!', 'en-US', { interrupt: true });
-    else MQ.Voice.say(`Let's climb the ${theme.name}! Level ${g.level}. ${lv.name.replace('·', '.').replace('±', 'plus or minus').replace('&', 'and')}.`, 'en-US', { interrupt: true });
+    const how = touchUI() ? 'Tap the right answer to jump up' : 'Walk under the right answer, then jump up';
+    const levelName = lv.name.replace('·', '.').replace('±', 'plus or minus').replace('&', 'and');
+    if (first) MQ.Voice.say(`Welcome to Castle Climb! ${how}, and climb 10 floors to the top. A wrong ledge crumbles, so just try again!`, 'en-US', { interrupt: true });
+    else MQ.Voice.say(`Let's climb the ${theme.name}! Level ${g.level}: ${levelName}. ${how}, 10 floors to the top!`, 'en-US', { interrupt: true });
     say(touchUI() ? 'Tap Start to climb!' : 'Press return to start climbing!');
     updateHud();
   }
@@ -725,7 +724,7 @@
         <div class="card">
           <h2>⏸ Paused</h2>
           <div class="menu">${items.map((it, i) => `<button class="btn ${i === 0 ? '' : 'secondary'} ${i === sel ? 'sel' : ''}" data-i="${i}">${it[0]}</button>`).join('')}</div>
-          <div class="press keys-only">Use <span class="key">↑</span> <span class="key">↓</span> and <span class="key">return</span></div>
+          <div class="press keys-only"><span class="key">↑</span> <span class="key">↓</span> <span class="key">return</span></div>
         </div>`,
         (k) => {
           if (k === 'ArrowUp' || k === 'ArrowDown') { sel = 1 - sel; MQ.Sound.click(); render(); }
@@ -761,9 +760,9 @@
       showOverlay(`
         <div class="card leave">
           <h2>🏠 Leave the climb?</h2>
-          <p class="hint">You are on floor ${floor} of 10.</p>
+          <div class="floor-now">${theme.emoji} ${floor} / 10</div>
           <div class="menu">${items.map((it, i) => `<button class="btn ${i === 0 ? '' : 'secondary'} ${i === sel ? 'sel' : ''}" data-i="${i}">${it[0]}</button>`).join('')}</div>
-          <div class="press keys-only">Use <span class="key">↑</span> <span class="key">↓</span> and <span class="key">return</span></div>
+          <div class="press keys-only"><span class="key">↑</span> <span class="key">↓</span> <span class="key">return</span></div>
         </div>`,
         (k) => {
           if (k === 'ArrowUp' || k === 'ArrowDown' || k === 'ArrowLeft' || k === 'ArrowRight') { sel = 1 - sel; MQ.Sound.click(); render(); }
@@ -774,7 +773,7 @@
       overlay.querySelectorAll('.menu .btn').forEach((b) => b.addEventListener('click', () => items[Number(b.dataset.i)][1]()));
     };
     render();
-    MQ.Voice.say('Leave the climb? Keep climbing, or go home?', 'en-US', { interrupt: true });
+    MQ.Voice.say(`Leave the climb? You are on floor ${floor}. Keep climbing, or go home?`, 'en-US', { interrupt: true });
   }
 
   // ---------- Effects ----------

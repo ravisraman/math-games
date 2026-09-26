@@ -172,40 +172,47 @@
       Object.assign(c, {
         minutes: [0, 30], words: ['oclock', 'half', 'half'], mix: { set: 3, read: 3, words: 2 },
         title: "O'clock & half past", desc: 'Set and read times like 3:00 and 3:30.',
+        pic: ['🕒 3:00', '🕞 3:30'], speak: "Set and read times like 3 o'clock and half past 3.",
       });
     } else if (L === 2) {
       Object.assign(c, {
         minutes: [0, 15, 30, 45, 15, 45], words: ['half', 'qpast', 'qto', 'qpast', 'qto'], mix: { set: 3, read: 3, words: 3 },
         title: 'Quarter past & quarter to', desc: 'Quarter past = :15. Quarter to = :45.',
+        pic: ['🕒 3:15', '🕞 3:45'], speak: 'Quarter past is 15 minutes. Quarter to is 45 minutes.',
       });
     } else if (L === 3) {
       Object.assign(c, {
         minutes: EVERY5, words: ['half', 'qpast', 'qto'], mix: { set: 3, read: 3, words: 1 },
         title: 'Every 5 minutes', desc: 'Any time on a 5-minute mark. Count by 5s!',
+        pic: ['🕒 3:05', '3:10', '3:25'], speak: 'Any time on a 5 minute mark. Count by fives!',
       });
     } else if (L === 4) {
       Object.assign(c, {
         minutes: EVERY5, labels: 0.6, elapsed: 'hours', words: ['half', 'qpast', 'qto'],
         mix: { set: 2, read: 2, words: 1, elapsed: 3, ampm: 1 },
         title: 'How much later? (hours)', desc: 'Add whole hours and half hours. Morning (a.m.) or night (p.m.)?',
+        pic: ['🕒 3:00 + 2 h', '☀️ / 🌙'], speak: 'How much later? Add hours and half hours. Is it morning or night?',
       });
     } else if (L === 5) {
       Object.assign(c, {
         minutes: EVERY5, labels: 0.4, elapsed: 'steps', words: ['qpast', 'qto', 'npast', 'nto'],
         mix: { set: 2, read: 2, words: 1, elapsed: 3, ampm: 1 },
         title: 'Later by 5s & 15s', desc: 'Add minutes — even past the next hour, like 2:45 + 30 minutes.',
+        pic: ['🕒 2:45 + 30 min'], speak: 'Add minutes, even past the next hour, like 2 45 plus 30 minutes.',
       });
     } else if (L === 6) {
       Object.assign(c, {
         minutes: EVERY1, step: 1, labels: 0.2, elapsed: 'steps', words: ['qpast', 'qto', 'npast', 'nto'],
         mix: { set: 3, read: 3, words: 1, elapsed: 2, ampm: 1 },
         title: 'To the exact minute', desc: 'Read and set times like 3:37. Count the little ticks!',
+        pic: ['🕒 3:37'], speak: 'Read and set times to the exact minute, like 3 37. Count the little ticks!',
       });
     } else {
       Object.assign(c, {
         minutes: EVERY1, step: 1, labels: 0, elapsed: 'hard', words: ['qpast', 'qto', 'npast', 'nto'], oddStart: L >= 8,
         mix: { set: 2, read: 2, words: 1, elapsed: 3, ampm: 1 },
         title: 'Clock master', desc: 'Everything mixed, with trickier elapsed time — even past 12!',
+        pic: ['🕒 3:37', '11:40 + 50 min'], speak: 'Clock master! Everything mixed, even past 12 o\'clock!',
       });
     }
     return c;
@@ -1004,10 +1011,11 @@
       g.lowRounds = 0;
     }
     g.maxLevel = Math.max(g.maxLevel, g.level);
-    if (g.level > before) return '⬆ Level up! The next climb is a little harder.';
-    if (g.level < before) return "Let's practice an easier climb, then come back up!";
-    if (firstTry >= 7) return 'Every wrong try counts. With fewer wrong tries you get 3 stars and a level up!';
-    return "Let's climb this level again for more stars!";
+    // speak: the full friendly sentence (spoken) · pic: a short icon line for the card.
+    if (g.level > before) return { speak: 'Level up! The next climb is a little harder.', pic: `⬆ Level ${g.level}!` };
+    if (g.level < before) return { speak: "Let's practice an easier climb, then come back up!", pic: `⬇ Level ${g.level} 💪` };
+    if (firstTry >= 7) return { speak: 'Every wrong try counts. With fewer wrong tries you get 3 stars and a level up!', pic: '🔁 Fewer ✗ → ⭐⭐⭐' };
+    return { speak: "Let's climb this level again for more stars!", pic: '🔁 Again for ⭐⭐⭐' };
   }
 
   function showResult(praise) {
@@ -1025,29 +1033,29 @@
     const move = adapt();
     persist();
     updateHud();
-    MQ.Voice.say(`${stars} star${stars > 1 ? 's' : ''}! ${move.replace(/[⬆→]/g, '').replace(/\s+/g, ' ')}`, 'en-US');
+    MQ.Voice.say(`${stars} star${stars > 1 ? 's' : ''}! ${move.speak}${newHero ? ` New hero unlocked: ${newHero.name}!` : ''}`, 'en-US');
 
     state = 'result';
     const starHtml = [1, 2, 3].map((i) => `<span class="${i <= stars ? '' : 'off'}">⭐</span>`).join('');
     const mins = Math.max(1, Math.round(stats.seconds / 60));
     showOverlay(`
       <div class="card">
-        <h2>🔔 Level ${level} climb complete!</h2>
+        <h2>🔔 Level ${level}</h2>
         <div class="stars-row">${starHtml}</div>
         <div class="praise"><span class="zh">${praise.zh}</span><small>${praise.py} · ${praise.en}</small></div>
         <div class="stats">
-          <span>🪟 ${firstTry}/${FLOORS} right on the first try</span>
-          ${stats.wrong ? `<span>🔁 ${stats.wrong} wrong tr${stats.wrong === 1 ? 'y' : 'ies'}</span>` : ''}
+          <span>🪟 ${firstTry}/${FLOORS}</span>
+          ${stats.wrong ? `<span>✗ ${stats.wrong}</span>` : ''}
           <span>⏱ ${mins} min</span>
-          ${stats.hints ? `<span>💡 ${stats.hints} hint${stats.hints === 1 ? '' : 's'}</span>` : ''}
+          ${stats.hints ? `<span>💡 ${stats.hints}</span>` : ''}
         </div>
-        <div class="next">${move}</div>
-        ${newHero ? `<div class="next">🎉 New hero unlocked: ${newHero.emoji} ${newHero.name}! Pick it in the portal.</div>` : ''}
+        <div class="next">${move.pic}</div>
+        ${newHero ? `<div class="next">🎉 ${newHero.emoji} ${MQ.escapeHtml(newHero.name)}</div>` : ''}
         <div class="btn-row">
-          <button class="btn start" id="again">Climb again ▶</button>
+          <button class="btn start" id="again">Again ▶</button>
           <a class="btn secondary home-link phone-only" href="../../index.html">🏠 Portal</a>
         </div>
-        <div class="press keys-only">Press <span class="key">return</span> to climb again</div>
+        <div class="press keys-only">Press <span class="key">return</span></div>
       </div>`,
       (k) => { if (k === 'Enter' || k === ' ') nextRound(); }
     );
@@ -1305,37 +1313,38 @@
     overlayKeys = null;
   }
 
+  // A small drawn clock hand (centre dot + hand) for the intro card's picture row.
+  function handSvg(color, len, width) {
+    return `<svg class="hand-pic" viewBox="0 0 70 24" aria-hidden="true">
+      <line x1="10" y1="12" x2="${10 + len}" y2="12" stroke="${color}" stroke-width="${width}" stroke-linecap="round"/>
+      <circle cx="10" cy="12" r="6" fill="#3a2a1a"/></svg>`;
+  }
+
   function showIntro() {
     state = 'intro';
     const first = g.played === 0;
-    const how = `
-      <div class="how keys-only">
-        <div>🕰️ <span class="hand blue">Long blue hand</span> = minutes: <span class="key">←</span> <span class="key">→</span></div>
-        <div>🕰️ <span class="hand red">Short red hand</span> = hour: <span class="key">↑</span> <span class="key">↓</span></div>
-        <div>✅ Press <span class="key">return</span> to check · <span class="key">H</span> for a hint</div>
-      </div>
-      <div class="how touch-only">
-        <div>👆 Drag the <span class="hand blue">long blue hand</span> = minutes</div>
-        <div>👆 Drag the <span class="hand red">short red hand</span> = hour</div>
-        <div>✅ Tap <b>✔ Check</b> · 💡 for a hint</div>
+    const goal = (cfg.pic || []).map((t) => `<span>${MQ.escapeHtml(t)}</span>`).join('<i>·</i>');
+    // First climb only: which hand is which, as a picture (spoken below too).
+    const hands = `
+      <div class="hands-row">
+        <span class="hand-item">${handSvg(MIN_COLOR, 54, 6)}<b class="blue">min</b></span>
+        <span class="hand-item">${handSvg(HOUR_COLOR, 32, 10)}<b class="red">hour</b></span>
       </div>`;
     showOverlay(`
-      <div class="card">
-        <h1>${hero} Clock Tower</h1>
-        <p>You are the village clock keeper!</p>
-        <div class="goal">Level ${g.level}: ${MQ.escapeHtml(cfg.title)}</div>
-        <p class="hint">${MQ.escapeHtml(cfg.desc)}</p>
-        <p>Every right answer lights a window 🪟.<br>Climb 8 floors and ring the big bell 🔔!</p>
-        ${first ? how : ''}
-        <button class="btn start" id="go">Start climbing ▶</button>
-        <div class="press keys-only">Press <span class="key">return</span> to start</div>
-        <div class="press touch-only">Tap <b>Start</b> when you're ready!</div>
+      <div class="card intro-card">
+        <h1>${hero} Level ${g.level}</h1>
+        <div class="goal-pic">${goal}</div>
+        ${first ? hands : ''}
+        <button class="btn start" id="go">Start ▶</button>
+        <div class="press keys-only">Press <span class="key">return</span></div>
       </div>`,
       (k) => { if (k === 'Enter' || k === ' ') startPlay(); }
     );
     el('go').addEventListener('click', startPlay);
-    MQ.Voice.say(`Clock Tower. Level ${g.level}. ${cfg.title.replace('&', 'and')}.`, 'en-US', { interrupt: true });
-    say(`Level ${g.level}: ${cfg.title}. ${MQ.isTouch ? 'Tap Start!' : 'Press return to start!'}`);
+    let talk = `Level ${g.level}. ${cfg.speak || cfg.title.replace('&', 'and')}`;
+    if (first) talk += ' The long blue hand shows the minutes. The short red hand shows the hour. Every right answer lights a window. Climb to the top and ring the bell!';
+    MQ.Voice.say(talk, 'en-US', { interrupt: true });
+    say(`Level ${g.level}: ${cfg.title}. ${MQ.isTouch ? 'Tap Start!' : 'Press return!'}`);
     updateHud();
   }
 
@@ -2071,7 +2080,7 @@
     if (state === 'celebrate' || state === 'result') {
       lines = fbLines; zhLine = fbZh; bg = '#fff3c4'; edge = '#e2ad3f';
     } else if (!q) {
-      lines = ['🕰️ Welcome, clock keeper!']; zhLine = data.settings.chinese ? '钟楼' : '';
+      lines = ['🪟 × 8  ➜  🔔']; zhLine = data.settings.chinese ? '钟楼' : '';
     } else if (phase === 'feedback') {
       lines = fbLines; zhLine = fbZh;
       if (lastRight) { bg = '#e9f8ee'; edge = '#2e9e5b'; } else { bg = '#fff0e3'; edge = '#e08a3c'; }
@@ -2539,7 +2548,7 @@
     if (state === 'celebrate' || state === 'result') {
       lines = fbLines; zhLine = fbZh; bg = '#fff3c4'; edge = '#e2ad3f';
     } else if (!q) {
-      lines = ['🕰️ Welcome, clock keeper!']; zhLine = data.settings.chinese ? '钟楼' : '';
+      lines = ['🪟 × 8  ➜  🔔']; zhLine = data.settings.chinese ? '钟楼' : '';
     } else if (toastOn) {
       lines = [toastText]; zhLine = ''; bg = '#fffbe6'; edge = '#f5c542';
     } else if (phase === 'feedback') {
