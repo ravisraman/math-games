@@ -1,0 +1,11 @@
+{
+  "name": "math-quest",
+  "private": true,
+  "description": "Math Quest games. The site itself needs no build; this file only installs the test tools.",
+  "scripts": {
+    "test": "bash tests/run-all.sh"
+  },
+  "devDependencies": {
+    "playwright": "^1.47.0"
+  }
+}
