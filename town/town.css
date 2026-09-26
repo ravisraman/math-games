@@ -210,6 +210,6 @@ body { background: #bfe6ff; }
 /* The idle "esc 🏠" chip sits under the top bar instead of on top of it. */
 .stage .mq-idle-esc { top: calc(max(12px, env(safe-area-inset-top)) + 66px); left: 14px; }
 .card .nm.long { font-size: 14px; letter-spacing: -0.2px; }
-@media (max-width: 700px) { .card .nm.long { font-size: 13px; } }
+@media (max-width: 700px) { .card .nm.long { font-size: 12px; letter-spacing: -0.4px; } }
 @media (max-height: 500px) and (orientation: landscape) { .card .nm.long { font-size: 11px; } }
 body.no-gl #btn-zoom-in, body.no-gl #btn-zoom-out, body.no-gl #btn-turn, body.no-gl .tray-head { display: none; }
