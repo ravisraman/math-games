@@ -494,13 +494,15 @@ html.lay-land .card.intro .row { font-size: 17px; margin-top: 4px; }
 .card .stats span { white-space: nowrap; }
 html.lay-land .card.intro .legend { flex-wrap: nowrap; gap: 4px 16px; }
 
+.amt { display: contents; }
+
 /* ======================================================================
    Laptop (JS puts lay-wide on <html> when the window is wider than 1000px):
    a slim top bar with the essentials, and the board filling the rest.
    ====================================================================== */
 html.lay-wide .layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(240px, 25%) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(200px, 24%) auto;
   grid-template-rows: auto minmax(0, 1fr);
   grid-template-areas: "hud bubble bar" "stage stage stage";
   align-items: stretch;
@@ -559,18 +561,20 @@ html.lay-wide .label {
   flex: none;
 }
 html.lay-wide .label .lbl-word { font-size: 13px; line-height: 1.05; max-width: 64px; text-align: center; margin-top: 3px; }
-html.lay-wide .big { font-size: 40px; line-height: 1; white-space: nowrap; flex: none; }
-html.lay-wide .zh.sub { font-size: 16px; min-height: 0; white-space: nowrap; flex: none; }
+html.lay-wide .big { font-size: 38px; line-height: 1; white-space: nowrap; flex: none; }
+html.lay-wide .amt { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; flex: none; }
+html.lay-wide .zh.sub { font-size: 14px; line-height: 1.1; min-height: 0; white-space: nowrap; margin-top: 1px; }
 html.lay-wide .zh.sub:empty { display: none; }
 html.lay-wide .target-box { flex: none; }
-html.lay-wide .pouch-box { flex: 1 1 auto; }
+html.lay-wide .pouch-box { flex: 1 1 auto; min-width: 190px; }
 html.lay-wide .pouch-box .need { display: none; }
 html.lay-wide .need2 {
   display: block;
   font-size: 17px;
   font-weight: 800;
   color: var(--sky);
-  max-width: 170px;
+  white-space: nowrap;
+  flex: none;
   line-height: 1.15;
   margin: 0;
   min-height: 0;
@@ -640,3 +644,14 @@ html.lay-land .card .intro-hero { width: 44px; height: 44px; margin: -8px 2px -6
   70% { transform: rotate(-1.5deg); }
 }
 @media (prefers-reduced-motion: reduce) { .choice.wrong { animation: none; } }
+
+/* Smaller laptop windows: a little tighter so the pouch coins keep their room. */
+@media (max-width: 1400px) {
+  html.lay-wide .layout { grid-template-columns: minmax(0, 1fr) minmax(190px, 21%) auto; }
+  html.lay-wide .level-pill .lvl-word { display: none; }
+  html.lay-wide .level-pill::before { content: "Lv"; font-size: 17px; color: var(--muted); margin-right: 6px; }
+  html.lay-wide .home { width: 56px; }
+  html.lay-wide .level-pill, html.lay-wide .star-pill { padding: 0 12px; }
+  html.lay-wide .bubble { font-size: 22px; padding: 0 10px; }
+  html.lay-wide .bubble .mascot { font-size: 30px; }
+}
