@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Math Quest">
+  <meta name="theme-color" content="#fff8ec">
+  <link rel="manifest" href="../manifest.webmanifest">
+  <link rel="apple-touch-icon" href="../icons/icon-180.png">
+  <title>My Town</title>
+  <link rel="stylesheet" href="../shared/style.css?v=11">
+  <link rel="stylesheet" href="town.css?v=11">
+  <script type="importmap">
+    { "imports": { "three": "../shared/vendor/three.module.min.js", "three/addons/": "../shared/vendor/addons/" } }
+  </script>
+</head>
+<body>
+  <main class="town" id="town">
+    <div class="stage" id="stage">
+      <div class="topbar">
+        <a class="tb-btn home" id="btn-home" href="../index.html" aria-label="Home" tabindex="-1">🏠</a>
+        <div class="title-pill"><span class="t-name">My Town</span><span class="t-count" id="t-count"></span></div>
+        <div class="tb-right">
+          <button class="tb-btn" id="btn-zoom-out" type="button" aria-label="Zoom out" tabindex="-1">➖</button>
+          <button class="tb-btn" id="btn-zoom-in" type="button" aria-label="Zoom in" tabindex="-1">➕</button>
+          <button class="tb-btn" id="btn-turn" type="button" aria-label="Turn the town" tabindex="-1">🔄<span class="kbadge keys-only">T</span></button>
+          <button class="tb-btn" id="btn-music" type="button" aria-label="Music on or off" tabindex="-1">🎵</button>
+        </div>
+      </div>
+      <div class="bubble" id="bubble" aria-live="polite" hidden></div>
+      <div class="actions" id="actions" hidden>
+        <button class="act" id="act-rotate" type="button" tabindex="-1">🔄<span class="kbadge keys-only">R</span></button>
+        <button class="act" id="act-remove" type="button" tabindex="-1">✋<span class="kbadge keys-only">⌫</span></button>
+      </div>
+      <div class="loading" id="loading">🏡</div>
+      <div class="nogl" id="nogl" hidden>
+        <div class="nogl-card">
+          <div class="nogl-emoji">🏡</div>
+          <p>Your town needs a newer browser to show in 3D.</p>
+          <p class="muted">Here are the pieces you have earned!</p>
+        </div>
+      </div>
+    </div>
+    <section class="tray" id="tray" aria-label="Your pieces">
+      <div class="tray-head">
+        <span class="keys-only hint"><span class="key">Q</span><span class="key">E</span> pick</span>
+        <span class="keys-only hint"><span class="key">←</span><span class="key">↑</span><span class="key">↓</span><span class="key">→</span> move</span>
+        <span class="keys-only hint"><span class="key">space</span> put</span>
+        <span class="keys-only hint"><span class="key">R</span> turn</span>
+        <span class="keys-only hint"><span class="key">⌫</span> pick up</span>
+        <span class="touch-only hint">Tap a piece, then tap the grass</span>
+      </div>
+      <div class="tray-list" id="tray-list"></div>
+    </section>
+  </main>
+
+  <script src="../shared/core.js?v=11"></script>
+  <script src="../shared/fx.js?v=11"></script>
+  <script src="../shared/town-data.js?v=11"></script>
+  <script type="module" src="town.js?v=11"></script>
+</body>
+</html>

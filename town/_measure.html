@@ -1,9 +1,0 @@
-<!doctype html><script type="importmap">{"imports":{"three":"../shared/vendor/three.module.min.js","three/addons/":"../shared/vendor/addons/"}}</script>
-<script src="../shared/core.js"></script><script src="../shared/town-data.js"></script>
-<script type="module">
-import * as THREE from 'three'; import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-const L=new GLTFLoader(); const out={};
-const all=[...MQ.TOWN.earned,...MQ.TOWN.free].map(p=>'town/'+p.model).concat(['pets/animal-panda']);
-for(const m of all){ const g=await L.loadAsync('../shared/models/'+m+'.glb'); const b=new THREE.Box3().setFromObject(g.scene); const s=b.getSize(new THREE.Vector3()); out[m]=[s.x,s.y,s.z,b.min.x,b.min.z,b.max.x,b.max.z].map(v=>+v.toFixed(2)); if(g.animations.length) out[m+'_anims']=g.animations.map(a=>a.name).join(',');}
-window.OUT=out; document.title='done';
-</script>
