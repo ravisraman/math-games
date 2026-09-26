@@ -217,6 +217,27 @@ const check = (name, ok, info) => { results.push(`${ok ? 'PASS' : 'FAIL'}  ${nam
       `lap=${lapHero} phoneLocal=${phLocal} phoneAfterSync=${phHero} unlocked=${unlocked.length} grid=${gridOk}`);
     await lap.context().close(); await ph.context().close();
   }
+  // ---- L. His town syncs; the newer layout wins; Start over clears it
+  {
+    store = {};
+    const lap = await device('lap'); const ph = await device('ph', true);
+    await setSave(lap, legacy(10, { coinCrossing: cc(4, 2, rows(4, 14)) }));
+    const code = await turnOn(lap);
+    await lap.evaluate(() => { const d = MQ.load(); d.town = { placed: [{ id: 'tent', x: 1, z: 2, r: 0 }, { id: 'road', x: 0, z: 0, r: 1 }] }; MQ.save(d); });
+    await lap.evaluate(async () => { await MQ.Sync.now(); });
+    await setSave(ph, legacy(0, {}));
+    await join(ph, code);
+    await ph.reload(); await sleep(600);
+    const phTown = await ph.evaluate(() => (MQ.load().town || {}).placed || []);
+    await sleep(20);
+    await ph.evaluate(() => { const d = MQ.load(); d.town.placed.push({ id: 'housea', x: 3, z: 3, r: 2 }); MQ.save(d); });
+    await ph.evaluate(async () => { await MQ.Sync.now(); });
+    await lap.reload(); await sleep(1500);
+    const lapTown = await lap.evaluate(() => (MQ.load().town || {}).placed.map((p) => p.id).join(','));
+    const bad = await lap.evaluate(() => { const d = MQ.load(); d.town = { placed: [{ id: '<img>', x: 'x', z: 1e9, r: 7 }, { id: 'tree', x: 2.4, z: -3, r: 5 }] }; MQ.save(d); return JSON.stringify(MQ.load().town.placed); });
+    check('L town syncs laptop→phone, phone edit wins back, bad pieces cleaned', phTown.length === 2 && lapTown === 'tent,road,housea' && bad === '[{"id":"tree","x":2,"z":-3,"r":1}]', `phone=${phTown.length} lap=${lapTown} cleaned=${bad}`);
+    await lap.context().close(); await ph.context().close();
+  }
   console.log(results.join('\n'));
   await b.close();
 })();

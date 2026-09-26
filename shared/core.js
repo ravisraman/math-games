@@ -92,8 +92,15 @@
       d.player.hero = heroId(d.player.hero);
       d.player.name = String(d.player.name || '').slice(0, 20);
     }
+    if (d.town !== undefined) {
+      // { placed: [{ id, x, z, r }] }: piece ids from MQ.TOWN, whole-number tiles, 4 turns.
+      const placed = d.town && Array.isArray(d.town.placed) ? d.town.placed : [];
+      d.town = { placed: placed.slice(0, 800).filter((p) => p && typeof p === 'object' && /^[a-z]{1,12}$/.test(String(p.id)))
+        .map((p) => ({ id: String(p.id), x: Math.max(-60, Math.min(60, Math.round(Number(p.x) || 0))), z: Math.max(-60, Math.min(60, Math.round(Number(p.z) || 0))), r: ((Math.round(Number(p.r) || 0) % 4) + 4) % 4 })) };
+    }
     if (d.stamps && typeof d.stamps === 'object') {
       d.stamps.player = clamp(d.stamps.player);
+      d.stamps.town = clamp(d.stamps.town);
       d.stamps.settings = clamp(d.stamps.settings);
       for (const k of ['set', 'games']) {
         const o = d.stamps[k];
@@ -136,7 +143,7 @@
     return JSON.stringify(rest);
   }
   function sections(d) {
-    const out = { player: JSON.stringify(d.player || {}), settings: {}, games: {} };
+    const out = { player: JSON.stringify(d.player || {}), town: JSON.stringify(d.town || null), settings: {}, games: {} };
     for (const k of Object.keys(d.settings || {})) out.settings[k] = JSON.stringify(d.settings[k]);
     for (const id of Object.keys(d.games || {})) out.games[id] = gameSig(d.games[id]);
     return out;
@@ -227,6 +234,7 @@
       if (t > resetAt) { out.games[id] = d.games[id]; out.stamps.games[id] = t; }
     }
     if ((st.player || 0) > resetAt) { out.player = d.player; out.stamps.player = st.player; }
+    if (d.town && (st.town || 0) > resetAt) { out.town = d.town; out.stamps.town = st.town; } else out.town = undefined;
     for (const k of Object.keys(d.settings || {})) {
       const t = settingTime(d, k);
       if (t > resetAt) { out.settings[k] = d.settings[k]; out.stamps.set[k] = t; }
@@ -253,6 +261,11 @@
     const pB = b.player ? sb.player || 0 : -Infinity;
     out.player = pA > pB ? a.player : b.player || a.player;
     out.stamps.player = Math.max(sa.player || 0, sb.player || 0);
+    // His town (the pieces he placed) as one piece too; the newer layout wins.
+    const tA = a.town ? sa.town || 0 : -Infinity;
+    const tB = b.town ? sb.town || 0 : -Infinity;
+    out.town = tA > tB ? a.town : b.town || a.town;
+    out.stamps.town = Math.max(sa.town || 0, sb.town || 0);
     // Each setting on its own; the newer one wins.
     out.settings = {};
     for (const k of new Set([...Object.keys(a.settings || {}), ...Object.keys(b.settings || {})])) {
@@ -287,6 +300,7 @@
     data.stamps.games = data.stamps.games || {};
     data.stamps.set = data.stamps.set || {};
     if (cur.player !== snap.player) data.stamps.player = now;
+    if (cur.town !== snap.town) data.stamps.town = now;
     for (const k of Object.keys(cur.settings)) if (cur.settings[k] !== snap.settings[k]) data.stamps.set[k] = now;
     for (const id of Object.keys(cur.games)) if (cur.games[id] !== snap.games[id]) data.stamps.games[id] = now;
     // Credit only what this page earned since it last looked (so two tabs never undo each other).
@@ -315,7 +329,7 @@
       if (live.games[id] && typeof live.games[id] === 'object') Object.assign(live.games[id], g);
       else live.games[id] = g;
     }
-    for (const k of ['stars', 'playSeconds', 'starsBy', 'secondsBy', 'stamps', 'resetAt']) live[k] = merged[k];
+    for (const k of ['stars', 'playSeconds', 'starsBy', 'secondsBy', 'stamps', 'resetAt', 'town']) live[k] = merged[k];
     snapshot = sections(live);
     base = { stars: Number(live.stars) || 0, seconds: Number(live.playSeconds) || 0 };
     try { applySettings(live.settings); } catch (e) { /* ignore */ }
