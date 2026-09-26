@@ -461,8 +461,15 @@
     if (t.done || state !== 'play' || e.type === 'pointercancel') return;
     const p = boardPoint(e);
     // Which cell was tapped (not clamped, so a tap just off the board still has a direction)?
-    const r = p.y < CASTLE_H ? BANK_ROW : 1 + Math.floor((p.y - CASTLE_H) / CELL);
-    const c = Math.floor(p.x / CELL);
+    let r = p.y < CASTLE_H ? BANK_ROW : 1 + Math.floor((p.y - CASTLE_H) / CELL);
+    let c = Math.floor(p.x / CELL);
+    if (w3d) {
+      const rect = stage.getBoundingClientRect();
+      const hit = w3d.screenToCell(e.clientX - rect.left, e.clientY - rect.top);
+      if (!hit) return;
+      r = hit.r; c = hit.c;
+      p.x = (hit.cf + 0.5) * CELL; p.y = hit.r === BANK_ROW ? 0 : rowMid(hit.r) + (hit.rf - hit.r) * CELL;
+    }
     const dr = r - player.r;
     const dc = c - player.c;
     if (dr === 0 && dc === 0) return; // tapped the hero itself: stay put
@@ -1928,6 +1935,7 @@
     pixelScale = scale * dpr;
     ctx.setTransform(pixelScale, 0, 0, pixelScale, MX * pixelScale, 0);
     bgCanvas = null; // repaint the ground at the new size
+    if (w3d) w3d.resize(Math.round(SW * scale), Math.round(H * scale));
     if (layout === 'wide') fitPouch();
   }
 
@@ -1953,12 +1961,37 @@
   window.addEventListener('orientationchange', () => { queueRelayout(); setTimeout(relayout, 300); });
   if (window.visualViewport) window.visualViewport.addEventListener('resize', queueRelayout);
 
+  // ---------- 3D board (Crossy Road style) ----------
+  // world3d.js draws the same board in 3D from a read-only view of the game state. The rules,
+  // the math and the save are all here; if WebGL isn't available the 2D board above is used.
+  let w3d = null;
+  const flatOnly = /[?&]flat\b/.test(location.search);
+  function start3d() {
+    if (w3d || flatOnly || !window.CC3D || !window.CC3D.supported()) return;
+    try {
+      w3d = window.CC3D.create(stage);
+      stage.classList.add('is3d');
+      resize();
+    } catch (e) { w3d = null; stage.classList.remove('is3d'); }
+  }
+  window.addEventListener('cc3d-ready', start3d);
+  const view3d = {};
+  function view() {
+    return Object.assign(view3d, {
+      cols: COLS, rows: ROWS, lanes, coins, player, gateLift, time, state,
+      heroId, pose: time < pose.until ? pose.name : null,
+      targetText: target ? MQ.money(target, targetFmt) : '',
+    });
+  }
+
   let last = performance.now();
   function frame(now) {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     update(dt);
-    draw(dt);
+    if (w3d) {
+      try { w3d.render(view(), dt); } catch (e) { console.error(e); w3d.dispose(); w3d = null; stage.classList.remove('is3d'); }
+    } else draw(dt);
     requestAnimationFrame(frame);
   }
 
@@ -1989,4 +2022,5 @@
   newLevel();
   showIntro();
   requestAnimationFrame(frame);
+  if (window.CC3D) start3d();
 })();

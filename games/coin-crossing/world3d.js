@@ -56,7 +56,7 @@ export function create(container, opts = {}) {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.domElement.className = 'world3d';
-  container.appendChild(renderer.domElement);
+  container.prepend(renderer.domElement); // under the cards and hints
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#9ed8ff');
@@ -255,9 +255,13 @@ export function create(container, opts = {}) {
       seen.add(coin);
       let o = coinObjs.get(coin);
       if (!o) { o = coinMesh(coin.v); coinObjs.set(coin, o); coinGroup.add(o); o.userData.was = coin.taken; }
+      const gone = coin.taken || !!coin.fly;
       if (coin.taken && !o.userData.was) pop(o.position.clone(), coin.v >= 100 ? '#8fd18a' : (COIN_LOOK[coin.v] || COIN_LOOK[1]).face);
+      if (!gone && o.userData.hidden) o.userData.grow = 0; // back on the board: grow in
       o.userData.was = coin.taken;
-      o.visible = !coin.taken;
+      o.userData.hidden = gone;
+      o.visible = !gone;
+      if (o.userData.grow !== undefined) { o.userData.grow = Math.min(1, o.userData.grow + 0.08); const k = 1 - Math.pow(1 - o.userData.grow, 3); o.scale.setScalar(0.2 + 0.8 * k); if (o.userData.grow >= 1) delete o.userData.grow; }
       o.position.set(X(coin.c), 0, Z(coin.r));
       const s = o.userData.spinner;
       if (s) { s.rotation.y = Math.sin(v.time * 1.6 + (coin.bob || 0)) * 0.22; s.rotation.x = -lean; }
@@ -302,7 +306,7 @@ export function create(container, opts = {}) {
     if (!g || heroId !== id) return;
     if (heroModel) heroRoot.remove(heroModel);
     const o = shadows(g.scene); // one hero at a time: use the scene itself so the mixer drives it
-    heroModel = fit(o, 0.78, 'xz');
+    heroModel = fit(o, 0.9, 'xz');
     heroRoot.add(heroModel);
     mixer = new THREE.AnimationMixer(o);
     actions = {};
@@ -340,6 +344,8 @@ export function create(container, opts = {}) {
     lastInv = p.inv;
     oopsT = Math.max(0, oopsT - dt); happyT = Math.max(0, happyT - dt);
     heroRoot.visible = !(p.inv > 0 && oopsT <= 0 && Math.floor(p.inv * 10) % 2 === 0);
+    if (v.pose === 'oops') oopsT = Math.max(oopsT, 0.2);
+    if (v.pose === 'happy') happyT = Math.max(happyT, 0.2);
     if (v.state === 'won' || v.state === 'result' || happyT > 0) play('dance');
     else if (oopsT > 0) play('gesture-negative');
     else if (t < 1) play('walk');
@@ -409,6 +415,17 @@ export function create(container, opts = {}) {
     cellToScreen(r, c) {
       const p = new THREE.Vector3(X(c), 0.4, Z(r)).project(camera);
       return { x: (p.x + 1) / 2 * size.w, y: (1 - p.y) / 2 * size.h };
+    },
+    // Which board cell is under a point on the canvas (CSS px)? Fractions too, for direction.
+    screenToCell(x, y) {
+      if (!size.w) return null;
+      const ndc = new THREE.Vector2(x / size.w * 2 - 1, -(y / size.h) * 2 + 1);
+      const ray = new THREE.Raycaster(); ray.setFromCamera(ndc, camera);
+      const hit = new THREE.Vector3();
+      if (!ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hit)) return null;
+      const cf = hit.x - 0.5 + dims.cols / 2, rf = hit.z + (dims.rows - 1);
+      const r = rf < 0.5 ? 0 : Math.round(rf);
+      return { r: Math.min(dims.rows - 1, r), c: Math.round(cf), cf, rf };
     },
     render(v, dt) {
       dims = { cols: v.cols, rows: v.rows };

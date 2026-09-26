@@ -74,5 +74,10 @@
   <script src="../../shared/core.js?v=11"></script>
   <script src="../../shared/fx.js?v=11"></script>
   <script src="game.js?v=11"></script>
+  <!-- 3D board (three.js). If WebGL or modules aren't available, the 2D board keeps working. -->
+  <script type="importmap">{"imports":{"three":"../../shared/vendor/three.module.min.js","three/addons/":"../../shared/vendor/addons/"}}</script>
+  <script type="module">
+    import('./world3d.js?v=11').then((m) => { window.CC3D = m; window.dispatchEvent(new Event('cc3d-ready')); }).catch(() => {});
+  </script>
 </body>
 </html>
