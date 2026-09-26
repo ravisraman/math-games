@@ -215,7 +215,9 @@
         if (!active) { if (shown) { shown = false; box.classList.remove('on'); } last = performance.now(); }
         else if (!shown && performance.now() - last > delay) {
           const spec = (opts.keys && opts.keys()) || [];
-          const groups = Array.isArray(spec[0]) ? [spec] : spec; // one [keys, word] pair or a list of them
+          // One [keys, word] pair, or a list of pairs (each an array or a Set).
+          const single = spec.length === 2 && Array.isArray(spec[0]) && typeof spec[1] === 'string';
+          const groups = (single ? [spec] : spec).map((grp) => Array.from(grp));
           const html = groups.map(([keys, word]) => `<span class="mq-idle-group">${keys.map((k) => `<span class="key">${MQ.escapeHtml(k)}</span>`).join('')}${word ? `<span class="mq-idle-word">${MQ.escapeHtml(word)}</span>` : ''}</span>`).join('');
           if (html !== sig) { keysEl.innerHTML = html; sig = html; }
           shown = true;
