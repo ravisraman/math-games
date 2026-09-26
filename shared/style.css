@@ -131,3 +131,18 @@ button {
 .mq-idle-esc { position: absolute; left: 12px; top: 12px; display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,.93); border-radius: 14px; padding: 5px 10px; font-size: 22px; box-shadow: 0 4px 12px rgba(20,30,50,.2); }
 @keyframes mq-idle-bob { 0%, 100% { transform: translate(-50%, 0); } 50% { transform: translate(-50%, -6px); } }
 @media (prefers-reduced-motion: reduce) { .mq-idle.on .mq-idle-keys { animation: none; } }
+
+/* ---------- shared/wash.js ---------- */
+.mq-wash-badge { position: relative; flex: none; border-radius: 14px; overflow: hidden; background: #e9f6ff; box-shadow: inset 0 0 0 3px rgba(255,255,255,.8), 0 3px 8px rgba(30,40,60,.2); }
+.mq-wash-badge img, .mq-wash-badge canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.mq-wash-q { position: absolute; right: 4px; bottom: 0; font-weight: 900; font-size: 18px; color: #fff; text-shadow: 0 2px 0 #4a3218; }
+.mq-wash { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.mq-wash-pic { position: relative; border-radius: 22px; overflow: hidden; background: radial-gradient(circle at 50% 40%, #f2fbff, #cfeaff); box-shadow: inset 0 0 0 4px rgba(255,255,255,.9), 0 6px 18px rgba(30,40,60,.25); cursor: crosshair; touch-action: none; user-select: none; -webkit-user-select: none; }
+.mq-wash-pic img, .mq-wash-pic canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.mq-wash-pic.clean { box-shadow: inset 0 0 0 4px #ffd84d, 0 0 0 6px rgba(255,216,77,.35), 0 8px 24px rgba(30,40,60,.25); }
+.mq-wash-nozzle { position: absolute; left: 0; top: 0; width: 28px; height: 28px; border-radius: 50%; border: 3px solid rgba(255,255,255,.95); box-shadow: 0 0 0 2px rgba(40,120,200,.6); pointer-events: none; opacity: .75; }
+.mq-wash-nozzle.on { background: rgba(160,220,255,.55); opacity: 1; }
+.mq-wash-pic.clean .mq-wash-nozzle { display: none; }
+.mq-wash-say { font-size: 24px; font-weight: 800; display: flex; align-items: center; gap: 8px; }
+.mq-wash-say .key { font-size: 16px; }
+.mq-wash-zh { font-size: 20px; color: #6b5a8a; }

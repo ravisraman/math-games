@@ -18,7 +18,7 @@ function lights(scene) {
 }
 
 // Render one model: a still (size px) or an animation strip (frames x size px, laid out left to right).
-window.render = async ({ url, size = 256, yaw = -0.4, pitch = 0.42, clip = null, frames = 1, margin = 1.12, format = 'image/webp', quality = 0.9 }) => {
+window.render = async ({ url, size = 256, yaw = -0.4, pitch = 0.42, clip = null, frames = 1, margin = 1.12, format = 'image/webp', quality = 0.9, fitAll = false }) => {
   const scene = new THREE.Scene(); lights(scene);
   const gltf = await loader.loadAsync(url);
   const model = gltf.scene;
@@ -27,7 +27,7 @@ window.render = async ({ url, size = 256, yaw = -0.4, pitch = 0.42, clip = null,
   model.position.set(-c.x, -box.min.y, -c.z); // feet on the ground at y=0
   const pivot = new THREE.Group(); pivot.add(model); pivot.rotation.y = yaw; scene.add(pivot);
   // Frame mostly by height so small animals (chick, crab) are not tiny next to big ones.
-  const R = Math.max(sz.y * 1.05, Math.max(sz.x, sz.z) * 0.82) * margin;
+  const R = (fitAll ? Math.max(sz.x, sz.y, sz.z) * 1.15 : Math.max(sz.y * 1.05, Math.max(sz.x, sz.z) * 0.82)) * margin;
   const cam = new THREE.OrthographicCamera(-R * 0.6, R * 0.6, R * 0.6, -R * 0.6, 0.01, 100);
   const midY = sz.y * 0.5;
   cam.position.set(0, midY + Math.sin(pitch) * 10, Math.cos(pitch) * 10); cam.lookAt(0, midY, 0);

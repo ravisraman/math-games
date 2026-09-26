@@ -7,6 +7,9 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '../..');
 const OUT = path.join(ROOT, 'shared/art/heroes');
 const HEROES = require('./heroes.json');
+const TOWN = require('../../shared/town-data.js');
+const TOWN_OUT = path.join(ROOT, 'shared/art/town');
+const ONLY = process.argv[2]; // 'heroes' or 'town' to render just one set
 // Animation strips: [name, clip in the model, frame count]
 const STRIPS = [['idle', 'idle', 8], ['happy', 'dance', 8], ['oops', 'gesture-negative', 6], ['walk', 'walk', 6]];
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.glb': 'model/gltf-binary', '.png': 'image/png' };
@@ -25,13 +28,21 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.glb': 'model/g
   await page.goto('http://art.local/render.html');
   await page.waitForFunction(() => window.ready);
   const save = (name, dataUrl) => fs.writeFileSync(path.join(OUT, name), Buffer.from(dataUrl.split(',')[1], 'base64'));
-  for (const h of HEROES) {
+  if (ONLY !== 'town') for (const h of HEROES) {
     const url = `/shared/models/pets/animal-${h.id}.glb`;
     save(`${h.id}.webp`, await page.evaluate((o) => render(o), { url, size: 256 }));
     for (const [name, clip, frames] of STRIPS) {
       save(`${h.id}-${name}.webp`, await page.evaluate((o) => render(o), { url, size: 160, clip, frames }));
     }
     process.stdout.write(h.id + ' ');
+  }
+  if (ONLY !== 'heroes') {
+    fs.mkdirSync(TOWN_OUT, { recursive: true });
+    for (const t of [...TOWN.earned, ...TOWN.free]) {
+      const d = await page.evaluate((o) => render(o), { url: `/shared/models/town/${t.model}.glb`, size: 256, yaw: -0.65, pitch: 0.6, fitAll: true });
+      fs.writeFileSync(path.join(TOWN_OUT, t.id + '.webp'), Buffer.from(d.split(',')[1], 'base64'));
+      process.stdout.write(t.id + ' ');
+    }
   }
   console.log('\ndone');
   await browser.close();
