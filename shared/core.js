@@ -1545,7 +1545,7 @@
     const y = Math.floor(c / 100);
     const j = Math.floor((c % 100) / 10);
     const f = c % 10;
-    let s = zhNumber(y) + '元';
+    let s = (y === 2 ? '两' : zhNumber(y)) + '元'; // 两元, as people say it
     if (j) s += DIGITS[j] + '角';
     else if (f) s += '零';
     if (f) s += DIGITS[f] + '分';

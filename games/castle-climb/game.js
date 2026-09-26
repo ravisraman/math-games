@@ -87,7 +87,8 @@
   function speakable(s) {
     return s.replace(/\p{Extended_Pictographic}/gu, '')
       .replace(/−/g, ' minus ').replace(/\+/g, ' plus ').replace(/=/g, ' equals ')
-      .replace(/\?/g, ' what number ').replace(/…/g, ', ').replace(/\s+/g, ' ').trim();
+      // A "?" standing alone is a blank in a number sentence ("3 + ? = 7"); after a word it asks a question.
+      .replace(/(^|[\s+−=])\?(?=[\s+−=]|$)/g, '$1 what number ').replace(/…/g, ', ').replace(/\s+/g, ' ').trim();
   }
 
   // ---------- Game state ----------
