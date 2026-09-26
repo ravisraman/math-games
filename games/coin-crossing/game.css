@@ -490,5 +490,6 @@ html.lay-land .card.intro .row { font-size: 17px; margin-top: 4px; }
 
 /* Result card: short icon lines, a bit bigger. */
 .card .next { font-size: 22px; }
-.card .stats { font-size: 18px; }
+.card .stats { font-size: 18px; flex-wrap: wrap; gap: 4px 18px; }
+.card .stats span { white-space: nowrap; }
 html.lay-land .card.intro .legend { flex-wrap: nowrap; gap: 4px 16px; }

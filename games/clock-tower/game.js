@@ -1315,7 +1315,7 @@
 
   // A small drawn clock hand (centre dot + hand) for the intro card's picture row.
   function handSvg(color, len, width) {
-    return `<svg class="hand-pic" viewBox="0 0 70 24" aria-hidden="true">
+    return `<svg class="hand-pic" viewBox="0 0 ${len + 18} 24" style="width:${len + 18}px" aria-hidden="true">
       <line x1="10" y1="12" x2="${10 + len}" y2="12" stroke="${color}" stroke-width="${width}" stroke-linecap="round"/>
       <circle cx="10" cy="12" r="6" fill="#3a2a1a"/></svg>`;
   }
