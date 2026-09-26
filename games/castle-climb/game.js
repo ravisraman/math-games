@@ -304,7 +304,7 @@
         if (!stats.retry.some((r) => r.key === problem.key) && floor < FLOORS - 2) stats.retry.push({ key: problem.key, due: Math.min(floor + 3, FLOORS - 1) });
       }
       const text = hintText();
-      say(layout === 'wide' ? `💡 ${text}` : '💡 Hint ⬆'); // phones: the hint scroll on the scene shows it
+      say('💡 Hint ⬆'); // the hint scroll on the scene shows the words (and they are spoken)
       MQ.Voice.say(speakable(text), 'en-US', { interrupt: true });
     }
     syncBar();
@@ -523,11 +523,11 @@
     hintOn = true;
     if (p.tries >= 2) {
       // Second miss on this floor: now show the whole solution.
-      say(layout === 'wide' ? `Oops! Here's how: ${p.full}` : '❌ Oops! 💡 See how ⬆');
+      say('❌ Oops! 💡 See how ⬆'); // the hint scroll shows the full solution
       MQ.Voice.say(`Not quite. Here's how. ${speakable(p.full)}`, 'en-US', { interrupt: true });
     } else {
       // First miss: only the strategy — he works it out and tries again.
-      say(layout === 'wide' ? `Oops, not that one. 💡 ${p.tip} Try again!` : '❌ Oops! 💡 Try again');
+      say('❌ Oops! 💡 Try again'); // the hint scroll shows the tip; it is spoken too
       MQ.Voice.say(`Not quite. ${speakable(p.tip)} Try again!`, 'en-US', { interrupt: true });
     }
   }
