@@ -1033,7 +1033,7 @@
     const move = adapt();
     persist();
     updateHud();
-    MQ.Voice.say(`${stars} star${stars > 1 ? 's' : ''}! ${move.speak}${newHero ? ` New hero unlocked: ${newHero.name}!` : ''}`, 'en-US');
+    MQ.Voice.say(`${stars} star${stars > 1 ? 's' : ''}! ${move.speak}${newHero ? ` New hero unlocked: ${newHero.name}! Pick it in the portal.` : ''}`, 'en-US');
 
     state = 'result';
     const starHtml = [1, 2, 3].map((i) => `<span class="${i <= stars ? '' : 'off'}">⭐</span>`).join('');

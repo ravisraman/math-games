@@ -262,3 +262,22 @@ html[data-layout="portrait"] .card .btn-row { display: flex; flex-direction: col
 html[data-layout="portrait"] .card .btn-row .btn { margin-top: 0; }
 html[data-layout="portrait"] .card .btn-row .btn.start { margin-top: 12px; }
 html[data-layout="landscape"] .card .btn-row .home-link { display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+
+/* Intro card: title + one big picture goal (+ first climb: which hand is which). */
+.card.intro-card { max-width: 440px; }
+.card .goal-pic { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px 14px; margin: 10px 0 6px; font-size: 40px; font-weight: 900; color: #7a3fb0; line-height: 1.15; }
+.card .goal-pic i { font-style: normal; color: #c9b7dc; }
+.card .hands-row { display: flex; justify-content: center; gap: 26px; margin: 12px 0 2px; }
+.card .hand-item { display: inline-flex; align-items: center; gap: 6px; font-size: 22px; }
+.card .hand-item .blue { color: #2f6fd6; }
+.card .hand-item .red { color: #e0473c; }
+.card .hand-pic { width: 70px; height: 24px; }
+.card .praise small { font-size: 18px; }
+.card .stats { font-size: 22px; font-weight: 800; color: var(--ink); gap: 20px; margin-top: 4px; }
+.card .next { font-size: 24px; }
+.card .press { font-size: 18px; }
+html[data-layout="portrait"] .card .goal-pic,
+html[data-layout="landscape"] .card .goal-pic { font-size: 32px; margin: 6px 0 4px; }
+html[data-layout="landscape"] .card .hands-row { margin-top: 6px; }
+html[data-layout="landscape"] .card .stats { font-size: 18px; }
+html[data-layout="landscape"] .card .next { font-size: 18px; }

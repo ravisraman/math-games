@@ -452,3 +452,43 @@ html.lay-port .target-box .label { white-space: normal; width: 62px; font-size: 
 html.lay-port .target-box .big { line-height: 1; }
 html.lay-port .level-pill .lvl-word { display: none; }
 html.lay-port .level-pill::before { content: "Lv"; font-size: 14px; margin-right: 4px; color: var(--muted); }
+
+/* ======================================================================
+   Bigger, easier-to-read coins (HUD pouch, intro legend, quizzes).
+   Overrides the shared .coin sizes for this game only.
+   ====================================================================== */
+.coin { font-weight: 900; letter-spacing: -0.5px; }
+.coin.c1  { width: 40px; height: 40px; font-size: 16px; background: radial-gradient(circle at 35% 30%, #f2b98a, #d08a4e 60%, #9a5624); color: #2a1200; text-shadow: 0 0 2px #ffe4c8, 0 0 2px #ffe4c8; }
+.coin.c5  { width: 43px; height: 43px; font-size: 16px; color: #15181c; text-shadow: 0 0 2px #fff, 0 0 2px #fff; }
+.coin.c10 { width: 38px; height: 38px; font-size: 15px; color: #15181c; text-shadow: 0 0 2px #fff, 0 0 2px #fff; }
+.coin.c25 { width: 47px; height: 47px; font-size: 17px; color: #15181c; text-shadow: 0 0 2px #fff, 0 0 2px #fff; }
+.bill { font-weight: 900; font-size: 16px; }
+
+/* ---------- Intro card: title, one big goal, coin pictures ---------- */
+.card.intro .goal-label { font-size: 22px; font-weight: 800; color: var(--muted); margin-top: 2px; }
+.card.intro .goal { font-size: 64px; line-height: 1.05; margin: 0; }
+.card .goal-zh { font-size: 22px; }
+.card.intro .legend { gap: 12px 26px; margin: 16px 0 10px; align-items: flex-end; }
+.card.intro .legend > div { font-size: 22px; font-weight: 800; gap: 6px; }
+.card.intro .legend .coin { zoom: 1.5; }
+.card.intro .legend .bill { zoom: 1.35; }
+.card.intro .row { font-size: 22px; font-weight: 800; margin: 8px 0 0; }
+.card.intro .row.small { font-size: 19px; color: var(--muted); }
+.card.intro .press { font-size: 19px; }
+
+html.lay-port .card.intro .goal { font-size: 56px; }
+html.lay-port .card.intro .legend { gap: 10px 18px; }
+html.lay-port .card.intro .legend > div { font-size: 19px; }
+html.lay-port .card.intro .legend .coin { zoom: 1.35; }
+html.lay-land .card.intro .goal-label { font-size: 18px; margin: 0; }
+html.lay-land .card.intro .goal { font-size: 44px; }
+html.lay-land .card.intro .goal-zh { font-size: 18px; }
+html.lay-land .card.intro .legend { margin: 6px 0 2px; gap: 6px 22px; }
+html.lay-land .card.intro .legend > div { font-size: 18px; gap: 2px; }
+html.lay-land .card.intro .legend .coin { zoom: 1.2; }
+html.lay-land .card.intro .row { font-size: 17px; margin-top: 4px; }
+
+/* Result card: short icon lines, a bit bigger. */
+.card .next { font-size: 22px; }
+.card .stats { font-size: 18px; }
+html.lay-land .card.intro .legend { flex-wrap: nowrap; gap: 4px 16px; }

@@ -131,7 +131,7 @@ body { background: linear-gradient(180deg, #ffe3c4 0%, #fff4e4 55%, #ffeede 100%
 .card h2 { margin: 0 0 8px; font-size: 26px; }
 .card p { font-size: 19px; margin: 8px 0; }
 .card .goal { font-size: 26px; font-weight: 900; color: #b3261e; margin: 6px 0 0; }
-.card .goal-zh { font-size: 20px; color: var(--muted); }
+.card .goal-zh { font-size: 22px; color: var(--muted); }
 .card .climb-what { font-size: 22px; font-weight: 900; color: #2f6f5a; margin: 4px 0 0; }
 .card .climb-what .zh { font-size: 18px; color: var(--muted); font-weight: 700; margin-left: 4px; }
 .card .example { display: inline-block; margin-top: 8px; padding: 4px 16px; border-radius: 12px; background: #fff1e0; font-size: 28px; font-weight: 900; color: #7a3b1a; }
@@ -142,11 +142,23 @@ body { background: linear-gradient(180deg, #ffe3c4 0%, #fff4e4 55%, #ffeede 100%
 .card .stars-row { font-size: 54px; letter-spacing: 6px; margin: 6px 0; }
 .card .stars-row .off { filter: grayscale(1); opacity: 0.3; }
 .card .praise { font-size: 28px; font-weight: 900; color: var(--good); }
-.card .praise small { display: block; font-size: 15px; color: var(--muted); font-weight: 600; }
+.card .praise small { display: block; font-size: 18px; color: var(--muted); font-weight: 600; }
 .card .stats { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px 18px; font-size: 17px; color: var(--muted); font-weight: 700; margin-top: 8px; }
 .card .next { margin-top: 10px; font-size: 18px; font-weight: 800; }
 .card .next.up, .card .next.up2 { color: var(--good); }
-.card .press { margin-top: 16px; font-size: 16px; color: var(--muted); }
+.card .press { margin-top: 16px; font-size: 18px; color: var(--muted); }
+/* Intro: title, the big goal, then a few picture rows (the details are spoken). */
+.card.intro h1 { font-size: 38px; margin-bottom: 2px; }
+.card.intro .goal { font-size: 28px; margin: 0; }
+.card.intro .example { font-size: 40px; padding: 6px 26px; margin-top: 12px; border-radius: 16px; }
+.card .pics { display: inline-grid; justify-items: start; gap: 8px; margin: 16px auto 0; font-size: 22px; font-weight: 800; color: #5a4636; text-align: left; }
+.card .pics > div { display: flex; align-items: center; gap: 12px; }
+.card .pics .ic { font-size: 30px; width: 40px; text-align: center; flex: none; }
+.card.result .stats { font-size: 24px; gap: 8px 22px; color: #5a4636; }
+.card .practice { margin-top: 10px; font-size: 20px; color: var(--muted); }
+.card.result .next { font-size: 22px; }
+.card .floor-now { font-size: 30px; font-weight: 900; color: #b3261e; margin: 4px 0 2px; }
+.card .press .key + .key { margin-left: 4px; }
 
 .menu { display: grid; gap: 10px; margin-top: 14px; }
 .menu .btn.sel { outline: 4px solid var(--sky); outline-offset: 3px; }
@@ -179,7 +191,6 @@ html.no-touch.lay-wide .touchbar { display: none; }
 #board { touch-action: none; }
 .stage { touch-action: none; }
 .card .btn.go { margin-top: 16px; min-height: 52px; font-size: 22px; padding: 12px 30px; }
-.card .how .keys:only-child { font-size: 34px; }
 
 /* ---------- Phone, held upright: HUD strip on top, big scene, button bar at the bottom ---------- */
 html.lay-portrait .layout {
@@ -270,11 +281,19 @@ html.lay-portrait .card .praise { font-size: 25px; }
 html.lay-portrait .card .stats { font-size: 16px; gap: 4px 12px; }
 html.lay-portrait .card .hint { font-size: 16px; }
 html.lay-portrait .card .next { font-size: 16px; }
+html.lay-portrait .card.intro h1 { font-size: 30px; }
+html.lay-portrait .card.intro .goal { font-size: 23px; }
+html.lay-portrait .card.intro .example { font-size: 34px; }
+html.lay-portrait .card .pics { font-size: 20px; gap: 6px; margin-top: 12px; }
+html.lay-portrait .card .pics .ic { font-size: 26px; width: 34px; }
+html.lay-portrait .card.result .stats { font-size: 21px; }
+html.lay-portrait .card.result .next { font-size: 19px; }
+html.lay-portrait .card .practice { font-size: 18px; }
 html.lay-landscape .card { max-width: 460px; padding: 12px 16px 14px; }
 html.lay-landscape .card h1 { font-size: 23px; margin-bottom: 2px; }
 html.lay-landscape .card h2 { font-size: 20px; margin-bottom: 2px; }
 html.lay-landscape .card .goal { font-size: 19px; }
-html.lay-landscape .card .goal-zh { font-size: 16px; }
+html.lay-landscape .card .goal-zh { font-size: 18px; }
 html.lay-landscape .card .climb-what { font-size: 16px; margin: 0; }
 html.lay-landscape .card .example { font-size: 21px; margin-top: 4px; }
 html.lay-landscape .card .how { margin: 6px 0 2px; }
@@ -282,8 +301,18 @@ html.lay-landscape .card p { font-size: 16px; margin: 4px 0; }
 html.lay-landscape .card .hint { font-size: 15px; line-height: 1.35; }
 html.lay-landscape .card .stars-row { font-size: 32px; margin: 2px 0; }
 html.lay-landscape .card .praise { font-size: 20px; }
-html.lay-landscape .card .praise small { font-size: 14px; }
+html.lay-landscape .card .praise small { font-size: 16px; }
 html.lay-landscape .card .stats { font-size: 14px; margin-top: 4px; gap: 2px 12px; }
 html.lay-landscape .card .next { font-size: 15px; margin-top: 4px; }
 html.lay-landscape .card .btn.go { margin-top: 8px; min-height: 46px; font-size: 19px; padding: 8px 24px; }
 html.lay-landscape .menu { gap: 8px; margin-top: 8px; }
+html.lay-landscape .card.intro h1 { font-size: 24px; }
+html.lay-landscape .card.intro .goal { font-size: 19px; }
+html.lay-landscape .card.intro .example { font-size: 26px; margin-top: 4px; padding: 2px 18px; }
+html.lay-landscape .card .pics { font-size: 17px; gap: 2px; margin-top: 6px; }
+html.lay-landscape .card .pics .ic { font-size: 21px; width: 28px; }
+html.lay-landscape .card .press { margin-top: 8px; font-size: 16px; }
+html.lay-landscape .card.result .stats { font-size: 18px; }
+html.lay-landscape .card.result .next { font-size: 17px; }
+html.lay-landscape .card .practice { font-size: 16px; margin-top: 4px; }
+html.lay-landscape .card .floor-now { font-size: 22px; margin: 0; }

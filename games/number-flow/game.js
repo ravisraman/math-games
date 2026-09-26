@@ -654,6 +654,7 @@
   function updateHud() {
     el('level').textContent = g.level;
     el('stars').textContent = data.stars;
+    el('pairs').classList.toggle('many', puzzle.pairs.length >= 5);
     el('pairs').innerHTML = puzzle.pairs.map((pr, p) => {
       const s = sumOf(p);
       let cls = 'chip', status;
@@ -1689,9 +1690,12 @@
     root.classList.toggle('nf-compact', compact);
     root.classList.toggle('nf-portrait', compact && !land);
     root.classList.toggle('nf-land', land);
+    // Laptop with room to spare: a wider side panel with bigger chips and Chinese.
+    const wide = !compact && vw >= 1150;
+    root.classList.toggle('nf-wide', wide);
     let scale;
     if (!compact) {
-      const availW = window.innerWidth - 300 - 20 - 36;
+      const availW = window.innerWidth - (wide ? 400 : 300) - (wide ? 28 : 20) - 36;
       const availH = window.innerHeight - 24;
       scale = Math.max(0.4, Math.min(availW / W, availH / H, 1.5));
     } else {

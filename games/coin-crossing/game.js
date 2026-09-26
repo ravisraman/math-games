@@ -270,7 +270,7 @@
 
   // ---------- HUD ----------
   function coinChip(v, big = false) {
-    const style = big ? ' style="transform:scale(1.5);margin:8px"' : '';
+    const style = big ? ' style="transform:scale(1.25);margin:6px"' : '';
     if (v >= 100) return `<span class="bill ${v === 500 ? 'b5' : ''}"${style}>$${v / 100}</span>`;
     return `<span class="coin c${v}"${style}>${v}¢</span>`;
   }
@@ -703,9 +703,9 @@
       if (g.struggles >= 2 && g.level > 1) { g.level--; g.struggles = 0; }
     }
     g.maxLevel = Math.max(g.maxLevel, g.level);
-    if (g.level > before) return { text: '⬆ Level up! Next one is a little harder.', kind: 'up' };
-    if (g.level < before) return { text: "Let's practice an easier one, then come back up!", kind: 'down' };
-    return { text: "Let's try this level again to get more stars!", kind: 'same' };
+    if (g.level > before) return { text: '⬆ Level up!', say: 'Level up! The next one is a little harder.', kind: 'up' };
+    if (g.level < before) return { text: '🔁 An easier one next', say: "Let's practice an easier one, then come back up!", kind: 'down' };
+    return { text: '🔁 Once more for ⭐', say: "Let's try this level again to get more stars!", kind: 'same' };
   }
 
   function showResult(praise) {
@@ -737,13 +737,15 @@
           <span>🚗 ${stats.bonks} bonk${stats.bonks === 1 ? '' : 's'}</span>
         </div>
         <div class="next">${move.text}</div>
-        ${newHero ? `<div class="next">🎉 New hero unlocked: ${newHero.emoji} ${newHero.name}! Pick it in the portal.</div>` : ''}
+        ${newHero ? `<div class="next">🎉 New hero: ${newHero.emoji} ${newHero.name}!</div>` : ''}
         <div class="press keys-only">Press <span class="key">return</span> for a bonus question ⭐</div>
         <button class="btn go touch-only" data-go>Bonus question ⭐ ▶</button>
       </div>`,
       (k) => { if (k === 'Enter' || k === ' ') startQuiz(); }
     );
     onGo(startQuiz);
+    MQ.Voice.say(move.say, 'en-US');
+    if (newHero) MQ.Voice.say(`New hero unlocked: ${newHero.name}! Pick it in the portal.`, 'en-US');
   }
 
   // ---------- Bonus questions between levels ----------
@@ -976,30 +978,41 @@
 
   function showIntro() {
     state = 'intro';
-    const legend = cfg.denoms.map((v) => `<div>${coinChip(v)}<span>${COINS[v].name}</span></div>`).join('');
+    const legendName = (v) => (v === 100 ? 'dollar' : v === 500 ? '5 dollars' : COINS[v].name);
+    const legend = cfg.denoms.map((v) => `<div>${coinChip(v)}<span>${legendName(v)}</span></div>`).join('');
     const first = g.played === 0;
     const zh = data.settings.chinese ? `<div class="goal-zh zh">${MQ.zhMoney(target)}</div>` : '';
-    const convert = targetFmt !== pouchFmt
-      ? `<p class="hint">🧠 Tricky! The castle counts in ${targetFmt === 'dollars' ? 'dollars' : 'cents'}, your pouch counts in ${pouchFmt === 'dollars' ? 'dollars' : 'cents'}.</p>`
+    const unit = (f) => (f === 'dollars' ? '$' : '¢');
+    const tricky = targetFmt !== pouchFmt;
+    const convert = tricky
+      ? `<div class="row">🧠 🏰 ${unit(targetFmt)} &nbsp;·&nbsp; 👝 ${unit(pouchFmt)}</div>`
+      : '';
+    // First time only: one small icon row (the rest is spoken).
+    const tip = first
+      ? `<div class="row small keys-only">🚗 🚫 &nbsp;·&nbsp; <span class="key">space</span> ↩ put back</div>
+        <div class="row small touch-only">🚗 🚫 &nbsp;·&nbsp; ↩ Put back</div>`
       : '';
     showOverlay(`
-      <div class="card">
+      <div class="card intro">
         <h1>${hero} Level ${g.level}</h1>
-        <p>Collect coins that add up to <b>exactly</b></p>
+        <div class="goal-label">Collect exactly</div>
         <div class="goal">${MQ.money(target, targetFmt)}</div>
         ${zh}
-        ${convert}
         <div class="legend">${legend}</div>
-        ${first ? `<p class="hint keys-only">Hop with the arrow keys. Stay away from the cars! 🚗<br>Grabbed the wrong coin? Press <span class="key">space</span> to put it back.<br>When you have the exact amount, hop into the castle 🏰 at the top.</p>
-        <p class="hint touch-only">Tap to hop, swipe to turn. Stay away from the cars! 🚗<br>Wrong coin? Tap <b>↩ Put back</b>.<br>Exact amount? Hop into the castle 🏰!</p>` : ''}
-        <div class="press keys-only">Press <span class="key">return</span> to start</div>
-        <button class="btn go touch-only" data-go>Start ▶</button>
+        ${convert}
+        ${tip}
+        <div class="press keys-only">Press <span class="key">return</span> ▶</div>
+        <button class="btn go touch-only" data-go>▶ Start</button>
       </div>`,
       (k) => { if (k === 'Enter' || k === ' ') startPlay(); }
     );
     onGo(startPlay);
     MQ.Voice.say(`Level ${g.level}. Collect exactly ${MQ.moneyWords(target)}.`, 'en-US', { interrupt: true });
-    if (first) MQ.Voice.say(touchUI() ? 'Tap to hop. Watch out for the cars! When you have exactly the right money, hop into the castle.' : 'Hop with the arrow keys. Watch out for the cars! When you have exactly the right money, hop into the castle.', 'en-US');
+    if (tricky) MQ.Voice.say(`Tricky! The castle counts in ${targetFmt === 'dollars' ? 'dollars' : 'cents'}, your pouch counts in ${pouchFmt === 'dollars' ? 'dollars' : 'cents'}.`, 'en-US');
+    if (first) {
+      MQ.Voice.say(touchUI() ? 'Tap to hop. Watch out for the cars! When you have exactly the right money, hop into the castle.' : 'Hop with the arrow keys. Watch out for the cars! When you have exactly the right money, hop into the castle.', 'en-US');
+      MQ.Voice.say(touchUI() ? 'Wrong coin? Tap put back.' : 'Wrong coin? Press space to put it back.', 'en-US');
+    }
     if (data.settings.chinese) MQ.Voice.say(MQ.zhMoney(target), 'zh-CN');
     say(`Collect exactly ${MQ.money(target, targetFmt)}!`);
   }
@@ -1434,17 +1447,17 @@
     ctx.beginPath(); ctx.ellipse(0, k.bill ? 22 : k.r + 4, k.bill ? 17 : k.r * 0.8, 5, 0, 0, Math.PI * 2); ctx.fill();
     if (k.bill) {
       ctx.rotate(-0.06);
-      roundRect(-25, -15, 50, 30, 5);
-      const paper = ctx.createLinearGradient(0, -15, 0, 15);
+      roundRect(-28, -17, 56, 34, 5);
+      const paper = ctx.createLinearGradient(0, -17, 0, 17);
       paper.addColorStop(0, shade(k.fill, 0.08)); paper.addColorStop(1, shade(k.fill, -0.06));
       ctx.fillStyle = paper; ctx.fill();
       ctx.lineWidth = 2.5; ctx.strokeStyle = k.edge; ctx.stroke();
-      roundRect(-20, -10, 40, 20, 3);
+      roundRect(-23, -12, 46, 24, 3);
       ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.stroke();
       ctx.fillStyle = 'rgba(255,255,255,0.35)';
-      ctx.beginPath(); ctx.ellipse(0, 0, 9, 8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(0, 0, 12, 10, 0, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = k.text;
-      ctx.font = `900 15px ${UI_FONT}`;
+      ctx.font = `900 19px ${UI_FONT}`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(`$${v / 100}`, 0, 1);
     } else {
