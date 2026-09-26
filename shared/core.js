@@ -1147,7 +1147,11 @@
 
     // After a failure, use the device voice for a while instead of making every sentence wait.
     cloudTrouble(kind) {
-      if (kind === 'quota') {
+      if (kind === 'busy') {
+        // Too many new phrases in a minute (e.g. fast dragging): wait a little, not until tomorrow.
+        this.cloudDownUntil = Math.max(this.cloudDownUntil, Date.now() + 20000);
+        this.cloudNote = '';
+      } else if (kind === 'quota') {
         const tomorrow = new Date();
         tomorrow.setUTCHours(24, 5, 0, 0);
         this.cloudDownUntil = tomorrow.getTime();
@@ -1170,23 +1174,38 @@
       text = this.clean(text);
       if (!this.enabled || !text) return;
       if (interrupt) this.stop();
-      const item = { text, lang, gen: this.gen, deadline: Date.now() + CLOUD_WAIT_MS };
-      if (this.cloudOk()) item.audio = this.fetchAudio(text, lang);
+      const item = { text, lang, gen: this.gen };
+      if (this.cloudOk()) {
+        if (this.cache.has(this.cacheKey(text, lang))) item.audio = this.fetchAudio(text, lang);
+        else {
+          // A brand-new phrase: wait a moment before asking the server, so a phrase that is
+          // replaced straight away (fast dragging, quick taps) never uses up the voice allowance.
+          item.audio = new Promise((resolve) => setTimeout(() => {
+            resolve(item.gen === this.gen ? this.fetchAudio(text, lang) : null);
+          }, interrupt ? 180 : 0));
+        }
+      }
       this.queue.push(item);
       this.pump();
     },
 
+    cacheKey(text, lang) {
+      const zh = lang.toLowerCase().startsWith('zh');
+      return `${zh ? 'zh' : 'en'}|${zh ? '' : this.speaker}|${text}`;
+    },
+
     fetchAudio(text, lang) {
       const zh = lang.toLowerCase().startsWith('zh');
-      const key = `${zh ? 'zh' : 'en'}|${zh ? '' : this.speaker}|${text}`;
+      const key = this.cacheKey(text, lang);
       if (this.cache.has(key)) return this.cache.get(key);
       const url = `${CLOUD}/tts?lang=${zh ? 'zh' : 'en'}&voice=${encodeURIComponent(this.speaker)}&text=${encodeURIComponent(text)}`;
       const p = fetch(url)
         .then(async (r) => {
           if (!r.ok) {
             const body = await r.text().catch(() => '');
-            const quota = r.status === 429 || r.status === 503 || /allocation|quota|limit|4006/i.test(body);
-            this.cloudTrouble(quota ? 'quota' : 'error');
+            // 429 = "slow down" (too many new phrases this minute); 503 ai-quota = today's allowance is used up.
+            const kind = r.status === 429 ? 'busy' : (r.status === 503 || /allocation|quota|4006/i.test(body)) ? 'quota' : 'error';
+            this.cloudTrouble(kind);
             throw new Error('tts ' + r.status);
           }
           return r.arrayBuffer();
@@ -1214,7 +1233,8 @@
         let buffer = null;
         if (item.audio && item.gen === this.gen) {
           const cancelled = new Promise((resolve) => { this.cancelWait = resolve; });
-          const wait = Math.max(0, item.deadline - Date.now());
+          // The wait starts when this phrase's turn comes, so a queue of phrases doesn't time out.
+          const wait = CLOUD_WAIT_MS;
           let timedOut = false;
           buffer = await Promise.race([item.audio, cancelled, new Promise((r) => setTimeout(() => { timedOut = true; r(null); }, wait))]);
           this.cancelWait = null;
