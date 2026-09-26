@@ -151,7 +151,7 @@ body { background: linear-gradient(180deg, #ffe3c4 0%, #fff4e4 55%, #ffeede 100%
 .card.intro h1 { font-size: 38px; margin-bottom: 2px; }
 .card.intro .goal { font-size: 28px; margin: 0; }
 .card.intro .example { font-size: 40px; padding: 6px 26px; margin-top: 12px; border-radius: 16px; }
-.card .pics { display: inline-grid; justify-items: start; gap: 8px; margin: 16px auto 0; font-size: 22px; font-weight: 800; color: #5a4636; text-align: left; }
+.card .pics { display: grid; width: fit-content; justify-items: start; gap: 8px; margin: 16px auto 0; font-size: 22px; font-weight: 800; color: #5a4636; text-align: left; }
 .card .pics > div { display: flex; align-items: center; gap: 12px; }
 .card .pics .ic { font-size: 30px; width: 40px; text-align: center; flex: none; }
 .card.result .stats { font-size: 24px; gap: 8px 22px; color: #5a4636; }
@@ -309,7 +309,8 @@ html.lay-landscape .menu { gap: 8px; margin-top: 8px; }
 html.lay-landscape .card.intro h1 { font-size: 24px; }
 html.lay-landscape .card.intro .goal { font-size: 19px; }
 html.lay-landscape .card.intro .example { font-size: 26px; margin-top: 4px; padding: 2px 18px; }
-html.lay-landscape .card .pics { font-size: 17px; gap: 2px; margin-top: 6px; }
+html.lay-landscape .card .pics { display: inline-grid; vertical-align: middle; font-size: 17px; gap: 2px; margin: 6px 0 0 12px; }
+html.lay-landscape .card.intro .example { vertical-align: middle; }
 html.lay-landscape .card .pics .ic { font-size: 21px; width: 28px; }
 html.lay-landscape .card .press { margin-top: 8px; font-size: 16px; }
 html.lay-landscape .card.result .stats { font-size: 18px; }
