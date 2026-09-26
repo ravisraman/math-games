@@ -137,7 +137,9 @@ const check = (name, ok, info) => { results.push(`${ok ? 'PASS' : 'FAIL'}  ${nam
     const lap = await device('lap');
     await setSave(lap, legacy(10, { coinCrossing: cc(3, 2, rows(3, 17)) }));
     await turnOn(lap);
-    await lap.goto(B + 'games/coin-crossing/index.html'); await sleep(1500);
+    // ?flat: the 2D board. This test is about sync timing, and software 3D in the test browser
+    // is slow enough to delay the page's timers.
+    await lap.goto(B + 'games/coin-crossing/index.html?flat'); await sleep(1500);
     await lap.evaluate(() => MQ.save(MQ._live)); await sleep(3200); // the game's first save fills in its defaults once
     const before = puts;
     for (let i = 0; i < 8; i++) { await lap.evaluate(() => { const d = MQ._live; d.games.coinCrossing.seconds = (d.games.coinCrossing.seconds || 0) + 15; d.playSeconds += 15; MQ.save(d); }); await sleep(400); }

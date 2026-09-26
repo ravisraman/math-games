@@ -11,8 +11,8 @@
   <link rel="manifest" href="../../manifest.webmanifest">
   <link rel="apple-touch-icon" href="../../icons/icon-180.png">
   <title>Coin Crossing</title>
-  <link rel="stylesheet" href="../../shared/style.css?v=11">
-  <link rel="stylesheet" href="game.css?v=11">
+  <link rel="stylesheet" href="../../shared/style.css?v=12">
+  <link rel="stylesheet" href="game.css?v=12">
 </head>
 <body>
   <main class="layout" id="layout">
@@ -72,15 +72,15 @@
     </aside>
   </main>
 
-  <script src="../../shared/core.js?v=11"></script>
-  <script src="../../shared/fx.js?v=11"></script>
-  <script src="../../shared/town-data.js?v=11"></script>
-  <script src="../../shared/wash.js?v=11"></script>
-  <script src="game.js?v=11"></script>
+  <script src="../../shared/core.js?v=12"></script>
+  <script src="../../shared/fx.js?v=12"></script>
+  <script src="../../shared/town-data.js?v=12"></script>
+  <script src="../../shared/wash.js?v=12"></script>
+  <script src="game.js?v=12"></script>
   <!-- 3D board (three.js). If WebGL or modules aren't available, the 2D board keeps working. -->
   <script type="importmap">{"imports":{"three":"../../shared/vendor/three.module.min.js","three/addons/":"../../shared/vendor/addons/"}}</script>
   <script type="module">
-    import('./world3d.js?v=11').then((m) => { window.CC3D = m; window.dispatchEvent(new Event('cc3d-ready')); }).catch(() => {});
+    import('./world3d.js?v=12').then((m) => { window.CC3D = m; window.dispatchEvent(new Event('cc3d-ready')); }).catch(() => {});
   </script>
 </body>
 </html>
