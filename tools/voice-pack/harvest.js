@@ -20,8 +20,10 @@ for (const { text, key } of list) {
   const url = `https://math-quest.rraman.workers.dev/tts?lang=en&voice=luna&text=${encodeURIComponent(text)}`;
   let out;
   try { out = execFileSync('curl', ['-s', '-D', '-', '-H', 'Origin: https://ravisraman.github.io', url], { maxBuffer: 1 << 24 }); } catch (e) { continue; }
-  const sep = out.indexOf('\r\n\r\n');
-  const head = out.slice(0, sep).toString();
+  // Skip any proxy "Connection Established" block: the real response headers are the last block.
+  let start = 0, sep = out.indexOf('\r\n\r\n');
+  while (sep >= 0 && /^HTTP\/\S+ 200 Connection established/i.test(out.slice(start, sep).toString())) { start = sep + 4; sep = out.indexOf('\r\n\r\n', start); }
+  const head = out.slice(start, sep).toString();
   const body = out.slice(sep + 4);
   if (!/^HTTP\/\S+ 200/.test(head) || !/x-cache:\s*hit/i.test(head) || body.length < 500) continue;
   const f = 'full-' + crypto.createHash('sha1').update('luna|' + key).digest('hex').slice(0, 12) + (/content-type:\s*audio\/wav/i.test(head) ? '.wav' : '.mp3');
