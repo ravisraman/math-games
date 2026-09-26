@@ -1124,6 +1124,129 @@
     return score;
   }
 
+  // ---------- Voice pack: pre-recorded natural-voice clips that cost nothing to play ----------
+  // The free cloud voice allows only ~90 new sentences a day, so the sentences the games say
+  // most (and every number, coin and money word) are recorded once into shared/voice/en/.
+  // A sentence is turned into spoken words ("58¢" -> "fifty-eight cents"), split into clauses,
+  // and each clause is built from the longest recorded pieces (a whole clause if there is one,
+  // otherwise phrases, then single words). Pieces are trimmed and joined into one smooth clip.
+  const VOICE_BASE = (() => { try { return new URL('voice/en/', document.currentScript.src).href; } catch (e) { return 'shared/voice/en/'; } })();
+  const ONES = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+  const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+  function numberWords(n) {
+    n = Math.floor(Math.abs(n));
+    if (n < 20) return ONES[n];
+    if (n < 100) return TENS[Math.floor(n / 10)] + (n % 10 ? '-' + ONES[n % 10] : '');
+    if (n < 1000) return ONES[Math.floor(n / 100)] + ' hundred' + (n % 100 ? ' ' + numberWords(n % 100) : '');
+    if (n < 1000000) return numberWords(Math.floor(n / 1000)) + ' thousand' + (n % 1000 ? ' ' + numberWords(n % 1000) : '');
+    return String(n);
+  }
+  // Text as it is spoken, as lower-case clauses of words: [['level', 'three'], ['collect', 'exactly', ...]].
+  function spokenClauses(text) {
+    let t = ' ' + String(text) + ' ';
+    t = t.replace(/\$(\d+)\.(\d\d)/g, (m, d, c) => { d = +d; c = +c; const a = d ? `${d} ${d === 1 ? 'dollar' : 'dollars'}` : ''; const b = c ? `${c} ${c === 1 ? 'cent' : 'cents'}` : ''; return a && b ? `${a} and ${b}` : a || b || '0 dollars'; });
+    t = t.replace(/\$(\d+)/g, (m, d) => `${d} ${+d === 1 ? 'dollar' : 'dollars'}`);
+    t = t.replace(/(\d+)\s*¢/g, (m, c) => `${c} ${+c === 1 ? 'cent' : 'cents'}`);
+    t = t.replace(/\b(\d{1,2}):(\d\d)\b/g, (m, h, mm) => (+mm === 0 ? `${+h} o'clock` : +mm < 10 ? `${+h} oh ${+mm}` : `${+h} ${+mm}`));
+    t = t.replace(/(\d)\s*\+\s*(?=\d)/g, '$1 plus ').replace(/(\d)\s*[−-]\s*(?=\d)/g, '$1 minus ').replace(/\s=\s/g, ' equals ').replace(/\s[×x]\s/g, ' times ');
+    t = t.replace(/(\d+)(st|nd|rd|th)\b/g, '$1');
+    t = t.replace(/\d+/g, (d) => ' ' + numberWords(+d) + ' ');
+    t = t.replace(/[’‘]/g, "'").replace(/[—–…]/g, ',').toLowerCase();
+    const out = [];
+    for (const part of t.split(/[.!?;:,()"“”]+/)) {
+      const words = part.replace(/[^a-z0-9' -]+/g, ' ').replace(/\s-\s|^-|-$/g, ' ').split(/\s+/).map((w) => w.replace(/^'+|'+$/g, '')).filter(Boolean);
+      if (words.length) out.push(words);
+    }
+    return out;
+  }
+  const Pack = {
+    voice: 'luna',
+    map: null, // key ("collect exactly") -> file name
+    full: null, // whole sentences ("level three | collect exactly fifty-eight cents") -> file name
+    loading: null,
+    decoded: new Map(),
+    load() {
+      if (this.loading) return this.loading;
+      this.loading = fetch(VOICE_BASE + 'manifest.json', { cache: 'no-cache' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((m) => { if (m && m.clips) { this.map = m.clips; this.full = m.full || {}; this.voice = m.voice || 'luna'; } return this.map; })
+        .catch(() => null);
+      return this.loading;
+    },
+    // The clips for a sentence, or null if some word has no recording.
+    plan(text) {
+      if (!this.map) return null;
+      const clauses = spokenClauses(text);
+      // A recording of the whole sentence (saved from the voice server's cache) sounds best.
+      const fk = clauses.map((c) => c.join(' ')).join(' | ');
+      if (this.full && this.full[fk]) return [{ files: [this.full[fk]], whole: fk }];
+      const pieces = [];
+      for (const words of clauses) {
+        const whole = words.join(' ');
+        let i = 0;
+        const clause = [];
+        while (i < words.length) {
+          let found = null;
+          for (let j = Math.min(words.length, i + 14); j > i; j--) {
+            const key = words.slice(i, j).join(' ');
+            if (this.map[key]) { found = { key, file: this.map[key], n: j - i }; break; }
+          }
+          if (!found) return null;
+          clause.push(found.file);
+          i += found.n;
+        }
+        pieces.push({ files: clause, whole });
+      }
+      return pieces.length ? pieces : null;
+    },
+    buffer(file) {
+      if (!this.decoded.has(file)) {
+        const p = fetch(VOICE_BASE + file).then((r) => { if (!r.ok) throw new Error('clip ' + r.status); return r.arrayBuffer(); })
+          .then((buf) => new Promise((resolve, reject) => { const ctx = Audio.init(); if (!ctx) { reject(new Error('no audio')); return; } const q = ctx.decodeAudioData(buf, resolve, reject); if (q && q.catch) q.catch(() => {}); }))
+          .then((b) => trimSilence(b))
+          .catch((e) => { this.decoded.delete(file); throw e; });
+        this.decoded.set(file, p);
+        if (this.decoded.size > 400) this.decoded.delete(this.decoded.keys().next().value);
+      }
+      return this.decoded.get(file);
+    },
+    // Join the clips into one buffer: short gaps between pieces, longer ones between clauses.
+    async build(plan) {
+      const ctx = Audio.init();
+      if (!ctx) return null;
+      const clauses = await Promise.all(plan.map((c) => Promise.all(c.files.map((f) => this.buffer(f)))));
+      const rate = ctx.sampleRate;
+      const gapWord = Math.round(rate * 0.03), gapClause = Math.round(rate * 0.2);
+      let len = 0;
+      clauses.forEach((bufs, ci) => { bufs.forEach((b, bi) => { len += b.length + (bi ? gapWord : 0); }); if (ci) len += gapClause; });
+      const out = ctx.createBuffer(1, Math.max(1, len), rate);
+      const data = out.getChannelData(0);
+      let at = 0;
+      clauses.forEach((bufs, ci) => {
+        if (ci) at += gapClause;
+        bufs.forEach((b, bi) => { if (bi) at += gapWord; data.set(b.getChannelData(0), at); at += b.length; });
+      });
+      return out;
+    },
+  };
+  // Cut the quiet start and end off a clip (with a tiny fade) so joined pieces flow.
+  function trimSilence(b) {
+    const d = b.getChannelData(0);
+    const th = 0.012;
+    let s = 0, e = d.length - 1;
+    while (s < e && Math.abs(d[s]) < th) s++;
+    while (e > s && Math.abs(d[e]) < th) e--;
+    const pad = Math.round(b.sampleRate * 0.025);
+    s = Math.max(0, s - pad); e = Math.min(d.length - 1, e + pad);
+    const ctx = Audio.ctx;
+    const out = ctx.createBuffer(1, Math.max(1, e - s + 1), b.sampleRate);
+    const o = out.getChannelData(0);
+    o.set(d.subarray(s, e + 1));
+    const fade = Math.min(Math.round(b.sampleRate * 0.012), Math.floor(o.length / 2));
+    for (let i = 0; i < fade; i++) { const k = i / fade; o[i] *= k; o[o.length - 1 - i] *= k; }
+    return out;
+  }
+
   const Voice = {
     enabled: true,
     natural: true,
@@ -1211,10 +1334,18 @@
 
     say(text, lang = 'en-US', { interrupt = false } = {}) {
       text = this.clean(text);
+      if (window.__voiceLog && text) window.__voiceLog.push({ text, lang }); // for building the voice pack
       if (!this.enabled || !text) return;
       if (interrupt) this.stop();
       const item = { text, lang, gen: this.gen };
-      if (this.cloudOk()) {
+      // Recorded clips first: free, instant after the first time, and they work offline.
+      const zh = lang.toLowerCase().startsWith('zh');
+      const plan = !zh && this.natural && this.speaker === Pack.voice ? Pack.plan(text) : null;
+      if (plan) {
+        item.audio = Pack.build(plan).catch(() => (this.cloudOk() ? this.fetchAudio(text, lang) : null));
+        item.fromPack = true;
+      } else if (!zh && this.natural && window.__voiceMissing) window.__voiceMissing.push(text); // tests: what the pack lacks
+      if (!plan && this.cloudOk()) {
         if (this.cache.has(this.cacheKey(text, lang))) item.audio = this.fetchAudio(text, lang);
         else {
           // A brand-new phrase: wait a moment before asking the server, so a phrase that is
@@ -1277,7 +1408,7 @@
           let timedOut = false;
           buffer = await Promise.race([item.audio, cancelled, new Promise((r) => setTimeout(() => { timedOut = true; r(null); }, wait))]);
           this.cancelWait = null;
-          if (timedOut && !buffer) this.cloudTrouble('error');
+          if (timedOut && !buffer && !item.fromPack) this.cloudTrouble('error');
         }
         if (item.gen === this.gen && !document.hidden) {
           const ctx = Audio.ctx;
@@ -1348,6 +1479,8 @@
     speechSynthesis.getVoices();
     if (speechSynthesis.addEventListener) speechSynthesis.addEventListener('voiceschanged', () => speechSynthesis.getVoices());
   } catch (e) { /* warm up voice list */ }
+
+  try { Pack.load(); } catch (e) { /* ignore */ }
 
   function applySettings(settings) {
     Sound.enabled = !!settings.sound;
@@ -1434,7 +1567,7 @@
   }
 
   window.MQ = {
-    HEROES, heroId, heroInfo, load, save, exportFile, importText, reset, unlockedHeroes,
+    HEROES, heroId, heroInfo, load, save, spokenClauses, VoicePack: Pack, exportFile, importText, reset, unlockedHeroes,
     Audio, Sound, Music, Voice, Sync, applySettings,
     cents, dollars, money, moneyWords, zhNumber, zhMoney,
     PRAISE, CHEER, pick, escapeHtml, isTouch, isStandalone,
