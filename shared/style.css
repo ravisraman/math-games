@@ -117,3 +117,17 @@ button {
   flex: none;
 }
 .bill.b5 { background: repeating-linear-gradient(90deg, #c9c3e8 0 6px, #bdb6e0 6px 12px); border-color: #4b3f8f; color: #2f2766; }
+
+/* ---------- shared/fx.js ---------- */
+.hero-img { display: inline-block; vertical-align: middle; object-fit: contain; image-rendering: auto; }
+.mq-fly-star { position: fixed; z-index: 1000; font-size: 34px; pointer-events: none; filter: drop-shadow(0 3px 4px rgba(0,0,0,.25)); }
+.mq-idle { position: absolute; inset: 0; pointer-events: none; z-index: 30; opacity: 0; transition: opacity .45s ease; }
+.mq-idle.on { opacity: 1; }
+.mq-idle-keys { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; gap: 18px; }
+.mq-idle.on .mq-idle-keys { animation: mq-idle-bob 1.4s ease-in-out infinite; }
+.mq-idle-group { display: inline-flex; align-items: center; gap: 5px; background: rgba(255,255,255,.93); border-radius: 16px; padding: 7px 12px; box-shadow: 0 6px 18px rgba(20,30,50,.22); }
+.mq-idle .key { font-size: 20px; min-width: 38px; height: 36px; display: inline-grid; place-items: center; }
+.mq-idle-word { font-weight: 800; font-size: 20px; color: #2b3440; margin-left: 4px; }
+.mq-idle-esc { position: absolute; left: 12px; top: 12px; display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,.93); border-radius: 14px; padding: 5px 10px; font-size: 22px; box-shadow: 0 4px 12px rgba(20,30,50,.2); }
+@keyframes mq-idle-bob { 0%, 100% { transform: translate(-50%, 0); } 50% { transform: translate(-50%, -6px); } }
+@media (prefers-reduced-motion: reduce) { .mq-idle.on .mq-idle-keys { animation: none; } }

@@ -5,22 +5,47 @@
 
   const KEY = 'mathQuest.save.v1';
 
-  // Heroes unlock as the player earns stars across all games.
+  // Heroes unlock as the player earns stars across all games. They are Kenney "Cube Pets" block
+  // animals (sprites in shared/art/heroes, drawn by shared/fx.js). The save keeps the short id.
   const HEROES = [
-    { emoji: '🐥', name: 'Chick', stars: 0 },
-    { emoji: '🐸', name: 'Frog', stars: 10 },
-    { emoji: '🐼', name: 'Panda', stars: 25 },
-    { emoji: '🐯', name: 'Tiger', stars: 45 },
-    { emoji: '🐲', name: 'Dragon', stars: 70 },
-    { emoji: '🦄', name: 'Unicorn', stars: 100 },
-    { emoji: '🤖', name: 'Robot', stars: 140 },
-    { emoji: '🦖', name: 'T-Rex', stars: 200 },
+    { id: 'chick', emoji: '🐥', name: 'Chick', zh: '小鸡', stars: 0 },
+    { id: 'bunny', emoji: '🐰', name: 'Bunny', zh: '兔子', stars: 5 },
+    { id: 'cat', emoji: '🐱', name: 'Cat', zh: '小猫', stars: 10 },
+    { id: 'dog', emoji: '🐶', name: 'Dog', zh: '小狗', stars: 15 },
+    { id: 'panda', emoji: '🐼', name: 'Panda', zh: '熊猫', stars: 25 },
+    { id: 'fox', emoji: '🦊', name: 'Fox', zh: '狐狸', stars: 35 },
+    { id: 'tiger', emoji: '🐯', name: 'Tiger', zh: '老虎', stars: 45 },
+    { id: 'penguin', emoji: '🐧', name: 'Penguin', zh: '企鹅', stars: 55 },
+    { id: 'pig', emoji: '🐷', name: 'Pig', zh: '小猪', stars: 65 },
+    { id: 'cow', emoji: '🐮', name: 'Cow', zh: '奶牛', stars: 75 },
+    { id: 'monkey', emoji: '🐵', name: 'Monkey', zh: '猴子', stars: 90 },
+    { id: 'koala', emoji: '🐨', name: 'Koala', zh: '考拉', stars: 105 },
+    { id: 'lion', emoji: '🦁', name: 'Lion', zh: '狮子', stars: 120 },
+    { id: 'deer', emoji: '🦌', name: 'Deer', zh: '小鹿', stars: 135 },
+    { id: 'parrot', emoji: '🦜', name: 'Parrot', zh: '鹦鹉', stars: 150 },
+    { id: 'elephant', emoji: '🐘', name: 'Elephant', zh: '大象', stars: 170 },
+    { id: 'giraffe', emoji: '🦒', name: 'Giraffe', zh: '长颈鹿', stars: 190 },
+    { id: 'crab', emoji: '🦀', name: 'Crab', zh: '螃蟹', stars: 210 },
+    { id: 'polar', emoji: '🐻‍❄️', name: 'Polar Bear', zh: '北极熊', stars: 235 },
+    { id: 'beaver', emoji: '🦫', name: 'Beaver', zh: '河狸', stars: 260 },
+    { id: 'bee', emoji: '🐝', name: 'Bee', zh: '蜜蜂', stars: 285 },
+    { id: 'fish', emoji: '🐠', name: 'Clownfish', zh: '小丑鱼', stars: 310 },
+    { id: 'hog', emoji: '🐗', name: 'Boar', zh: '野猪', stars: 340 },
+    { id: 'worm', emoji: '🐛', name: 'Caterpillar', zh: '毛毛虫', stars: 370 },
   ];
+  // Saves from before the block animals stored an emoji. Each maps to an animal unlocked at the
+  // same number of stars or fewer, so nothing he had unlocked becomes locked.
+  const OLD_HEROES = { '🐥': 'chick', '🐸': 'cat', '🐼': 'panda', '🐯': 'tiger', '🐲': 'pig', '🦄': 'monkey', '🤖': 'deer', '🦖': 'giraffe' };
+  function heroId(v) {
+    if (HEROES.some((h) => h.id === v)) return v;
+    return OLD_HEROES[v] || 'chick';
+  }
+  function heroInfo(v) { const id = heroId(v); return HEROES.find((h) => h.id === id); }
 
   function defaults() {
     return {
       version: 1,
-      player: { name: '', hero: '🐥' },
+      player: { name: '', hero: 'chick' },
       settings: { sound: true, music: true, voice: true, chinese: true },
       stars: 0,
       playSeconds: 0,
@@ -64,7 +89,7 @@
     const limit = Date.now() + DAY;
     const clamp = (t) => { t = Number(t) || 0; return t > limit ? 0 : t; };
     if (d.player && typeof d.player === 'object') {
-      if (!HEROES.some((h) => h.emoji === d.player.hero)) d.player.hero = '🐥';
+      d.player.hero = heroId(d.player.hero);
       d.player.name = String(d.player.name || '').slice(0, 20);
     }
     if (d.stamps && typeof d.stamps === 'object') {
@@ -1395,7 +1420,7 @@
   }
 
   window.MQ = {
-    HEROES, load, save, exportFile, importText, reset, unlockedHeroes,
+    HEROES, heroId, heroInfo, load, save, exportFile, importText, reset, unlockedHeroes,
     Audio, Sound, Music, Voice, Sync, applySettings,
     cents, dollars, money, moneyWords, zhNumber, zhMoney,
     PRAISE, CHEER, pick, escapeHtml, isTouch, isStandalone,

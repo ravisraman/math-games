@@ -177,7 +177,8 @@ const check = (name, ok, info) => { results.push(`${ok ? 'PASS' : 'FAIL'}  ${nam
     await lap.reload(); await sleep(300);
     await lap.click('#grownups-btn'); await sleep(300);
     const html = await lap.evaluate(() => document.body.innerHTML);
-    check('I no injected markup in portal', !/<img src="?x|<b>x<\/b>|onerror/i.test(html) && (await lap.textContent('#hero-now')) === '🐥', `hero shown=${await lap.textContent('#hero-now')}`);
+    const heroSrc = await lap.getAttribute('#hero-now img', 'src');
+    check('I no injected markup in portal', !/<img src="?x|<b>x<\/b>|onerror|<script>/i.test(html) && /heroes\/chick\.webp/.test(heroSrc || ''), `hero shown=${heroSrc}`);
     await lap.context().close();
   }
   // ---- J. Erase the cloud copy: the other device stops syncing instead of re-creating it
@@ -195,6 +196,25 @@ const check = (name, ok, info) => { results.push(`${ok ? 'PASS' : 'FAIL'}  ${nam
     const lapCode = await lap.evaluate(() => MQ.Sync.code);
     const newCode = await turnOn(lap);
     check('J erase: cloud gone, phone stops syncing and keeps progress, sync can start again', !store[code] && lapCode === null && phState.code === null && phState.err === 'erased' && phState.stars === 20 && !!store[newCode], `cloud=${!!store[code]} phone code=${phState.code} err=${phState.err} stars=${phState.stars} restart=${!!store[newCode]}`);
+    await lap.context().close(); await ph.context().close();
+  }
+  // ---- K. Old emoji heroes become block animals, on this device and through sync
+  {
+    store = {};
+    const lap = await device('lap'); const ph = await device('ph', true);
+    await setSave(lap, legacy(30, { coinCrossing: cc(3, 3, rows(3, 9)) })); // legacy() picks the 🐼 panda
+    await lap.reload(); await sleep(300);
+    const lapHero = await lap.evaluate(() => MQ.load().player.hero);
+    const code = await turnOn(lap);
+    await setSave(ph, { ...legacy(0, {}), player: { name: 'Leo', hero: '🦖' } });
+    const phLocal = await ph.evaluate(() => MQ.load().player.hero);
+    await join(ph, code);
+    await ph.reload(); await sleep(600);
+    const phHero = await ph.evaluate(() => MQ.load().player.hero);
+    const unlocked = await ph.evaluate(() => MQ.unlockedHeroes(MQ.load().stars).map((h) => h.id));
+    const gridOk = await lap.evaluate(() => document.querySelectorAll('#heroes [data-hero]').length === 24 && !!document.querySelector('#heroes [data-hero="panda"].on'));
+    check('K old emoji heroes carry over (🐼→panda, 🦖→giraffe), sync keeps an animal, 24 in the grid', lapHero === 'panda' && phLocal === 'giraffe' && ['panda', 'giraffe'].includes(phHero) && unlocked.includes('panda') && gridOk,
+      `lap=${lapHero} phoneLocal=${phLocal} phoneAfterSync=${phHero} unlocked=${unlocked.length} grid=${gridOk}`);
     await lap.context().close(); await ph.context().close();
   }
   console.log(results.join('\n'));

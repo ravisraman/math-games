@@ -9,25 +9,25 @@
     {
       id: 'coinCrossing', name: 'Coin Crossing', zh: '过马路', href: 'games/coin-crossing/index.html',
       art: ['🏰', '🪙', '🚗'], theme: 'coins', skill: 'Money',
-      what: 'Hop across the roads and collect exactly the right amount of money.',
+      what: 'Get the right coins!',
       levels: 'Levels 1–2 pennies & nickels · 3–4 dimes · 5–7 quarters · 8–9 dollars · 10+ mixed cents/dollars · 14+ $5 bills.',
     },
     {
       id: 'numberFlow', name: 'Number Flow', zh: '数字连线', href: 'games/number-flow/index.html',
       art: ['🔵', '➕', '🟢'], theme: 'flow', skill: 'Adding',
-      what: 'Draw paths through numbers that add up to the target — like Flow Free.',
+      what: 'Add up the path!',
       levels: 'Boards grow from 4×4 with 2 pairs to 7×7 with 5 pairs; numbers from 1–5 up to 10s and 20s; targets from 5 up to ~60.',
     },
     {
       id: 'clockTower', name: 'Clock Tower', zh: '钟楼', href: 'games/clock-tower/index.html',
       art: ['🕰️', '🔔', '⭐'], theme: 'clock', skill: 'Time',
-      what: 'Be the clock keeper: read and set the clock, and figure out elapsed time.',
+      what: 'Tell the time!',
       levels: 'L1 o\'clock & half past · L2 quarter past/to · L3 5-minute times · L4 elapsed hours + a.m./p.m. · L5 elapsed minutes · L6 1-minute times · 7+ mixed.',
     },
     {
       id: 'castleClimb', name: 'Castle Climb', zh: '爬城堡', href: 'games/castle-climb/index.html',
       art: ['🏯', '🏮', '🎆'], theme: 'climb', skill: 'Math facts',
-      what: 'Jump to the right answer to climb the tower. Adding and subtracting facts.',
+      what: 'Jump to the answer!',
       levels: 'L1 +10 · L2 −10 · L3 +20 make-ten · L4 ±20 · L5 tens · L6 2-digit±1-digit · L7–8 2-digit±2-digit · L9 three numbers · L10 missing numbers · 11+ review to 100.',
     },
   ];
@@ -43,7 +43,7 @@
   function render() {
     const name = data.player.name;
     $('hello').textContent = name ? `Hi ${name}! Ready to play?` : 'Welcome!';
-    $('hero-now').textContent = data.player.hero;
+    $('hero-now').innerHTML = MQ.Art.img(data.player.hero, 52);
     $('star-count').textContent = data.stars;
 
     $('games').innerHTML = GAMES.map((g) => `
@@ -59,11 +59,12 @@
         </span>
       </button>`).join('');
 
+    const heroNow = MQ.heroId(data.player.hero);
     $('heroes').innerHTML = MQ.HEROES.map((h) => {
       const locked = data.stars < h.stars;
-      const on = data.player.hero === h.emoji;
-      return `<button class="hero nav ${locked ? 'locked' : ''} ${on ? 'on' : ''}" data-hero="${h.emoji}" aria-label="${h.name}${locked ? ', locked' : ''}">
-        <span class="e">${h.emoji}</span>
+      const on = heroNow === h.id;
+      return `<button class="hero nav ${locked ? 'locked' : ''} ${on ? 'on' : ''}" data-hero="${h.id}" aria-label="${h.name}${locked ? ', locked' : ''}">
+        <span class="e">${MQ.Art.img(h.id, 64)}</span>
         <span class="n">${locked ? `⭐ ${h.stars}` : h.name}</span>
       </button>`;
     }).join('');
@@ -79,17 +80,17 @@
     }
     const heroBtn = e.target.closest('[data-hero]');
     if (heroBtn) {
-      const h = MQ.HEROES.find((x) => x.emoji === heroBtn.dataset.hero);
+      const h = MQ.HEROES.find((x) => x.id === heroBtn.dataset.hero);
       if (data.stars < h.stars) {
         MQ.Sound.nope();
         MQ.Voice.say(`Earn ${h.stars} stars to unlock the ${h.name}!`, 'en-US', { interrupt: true });
         return;
       }
-      data.player.hero = h.emoji;
+      data.player.hero = h.id;
       MQ.save(data);
       MQ.Sound.star();
       render();
-      document.querySelector(`[data-hero="${h.emoji}"]`).focus();
+      document.querySelector(`[data-hero="${h.id}"]`).focus();
     }
   });
 

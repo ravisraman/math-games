@@ -1,0 +1,50 @@
+<!doctype html>
+<!-- Renders Kenney 3D models into sprite images for the 2D games. Driven by render.js. -->
+<html><body style="margin:0;background:transparent">
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+const loader = new GLTFLoader();
+
+function lights(scene) {
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x8a99ad, 1.55));
+  const key = new THREE.DirectionalLight(0xffffff, 2.0); key.position.set(3, 6, 5); scene.add(key);
+  const rim = new THREE.DirectionalLight(0xfff1dd, 0.6); rim.position.set(-4, 3, -3); scene.add(rim);
+}
+
+// Render one model: a still (size px) or an animation strip (frames x size px, laid out left to right).
+window.render = async ({ url, size = 256, yaw = -0.4, pitch = 0.42, clip = null, frames = 1, margin = 1.12, format = 'image/webp', quality = 0.9 }) => {
+  const scene = new THREE.Scene(); lights(scene);
+  const gltf = await loader.loadAsync(url);
+  const model = gltf.scene;
+  const box = new THREE.Box3().setFromObject(model);
+  const c = box.getCenter(new THREE.Vector3()), sz = box.getSize(new THREE.Vector3());
+  model.position.set(-c.x, -box.min.y, -c.z); // feet on the ground at y=0
+  const pivot = new THREE.Group(); pivot.add(model); pivot.rotation.y = yaw; scene.add(pivot);
+  // Frame mostly by height so small animals (chick, crab) are not tiny next to big ones.
+  const R = Math.max(sz.y * 1.05, Math.max(sz.x, sz.z) * 0.82) * margin;
+  const cam = new THREE.OrthographicCamera(-R * 0.6, R * 0.6, R * 0.6, -R * 0.6, 0.01, 100);
+  const midY = sz.y * 0.5;
+  cam.position.set(0, midY + Math.sin(pitch) * 10, Math.cos(pitch) * 10); cam.lookAt(0, midY, 0);
+  // keep the feet near the bottom with a little room for the shadow
+  cam.position.y += R * 0.08; cam.lookAt(0, midY + R * 0.08, 0);
+  const mixer = new THREE.AnimationMixer(model);
+  let action = null, dur = 0;
+  if (clip) { const a = gltf.animations.find((x) => x.name === clip); if (a) { action = mixer.clipAction(a); action.play(); dur = a.duration; } }
+  const out = document.createElement('canvas'); out.width = size * frames; out.height = size;
+  const o = out.getContext('2d');
+  renderer.setSize(size, size);
+  for (let i = 0; i < frames; i++) {
+    if (action) mixer.setTime((dur * i) / frames);
+    renderer.render(scene, cam);
+    o.drawImage(renderer.domElement, i * size, 0);
+  }
+  return out.toDataURL(format, quality);
+};
+window.ready = true;
+</script></body></html>
