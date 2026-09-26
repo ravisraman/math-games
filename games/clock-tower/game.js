@@ -12,11 +12,14 @@
   const FLOORS = 8;
   const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
   const ZH_FONT = '"PingFang SC","Hiragino Sans GB","Noto Sans SC","Heiti SC",sans-serif';
-  const CX = 530;            // big clock centre
+  // The laptop board is 760 tall and as wide as the window allows (at least 1040): the extra width
+  // is shared out as room around the tower, the clock and the answer column (see deskLayout).
+  let CX = 530;              // big clock centre
   const CY = 456;
   const R = 216;             // clock face radius (brass bezel sits outside this)
   const COL = { x: 818, w: 206 };             // right-hand column: choices / controls
   const BANNER = { x: 252, y: 12, w: 776, h: 128 };
+  let TX = 0;                // laptop: the tower (and hero) are drawn shifted right by this much
   const T_CX = 126;          // tower centre line
   const T_LEFT = 40;
   const T_RIGHT = 212;
@@ -44,13 +47,6 @@
     elapsed: 'Elapsed time',
     ampm: 'a.m. / p.m.',
   };
-  const SKILL_TAG = {
-    set: '⏰ Set the clock',
-    read: '👀 Read the clock',
-    words: '💬 Clock words',
-    elapsed: '⏳ How much time?',
-    ampm: '🌗 a.m. or p.m.?',
-  };
 
   // ---------- Save data ----------
   const data = MQ.load();
@@ -60,12 +56,13 @@
     data.games[GAME_ID] || {}
   ));
   g.lowRounds = g.lowRounds || 0;
-  const hero = data.player.hero || '🐥';
+  const heroId = MQ.heroId(data.player.hero);
+  MQ.Art.preload(heroId);
   function persist() { MQ.save(data); }
 
   // ---------- DOM ----------
   const canvas = document.getElementById('board');
-  const ctx = canvas.getContext('2d');
+  let ctx = canvas.getContext('2d'); // swapped briefly while a cached layer is painted
   const stage = document.getElementById('stage');
   const overlay = document.getElementById('overlay');
   const el = (id) => document.getElementById(id);
@@ -702,6 +699,10 @@
   let drag = null;
 
   const heroAnim = { from: 0, to: 0, t: 1 };
+  const heroMood = { pose: 'idle', until: 0 }; // 'happy' after a right answer, 'oops' after a wrong one
+  let wobbleAt = -9;    // a small wobble of the hero after a wrong answer
+  let pendingStar = 0;  // the window whose ⭐ is still flying to the top bar
+  const blocks = MQ.FX.blocks();
 
   function newRound() {
     cfg = cfgFor(g.level);
@@ -780,14 +781,17 @@
     updateHud();
     MQ.Voice.say(q.speak, 'en-US', { interrupt: true });
     if (data.settings.chinese && q.mode === 'set' && q.type === 'set') MQ.Voice.say(q.zh, 'zh-CN');
+    // Short caption on screen; the "how" is spoken in his first climbs.
     if (q.mode === 'set') {
-      say(stats.asked <= 1 && g.played < 3
-        ? (MQ.isTouch
-          ? 'Drag the long blue hand and the short red hand with your finger. Then tap ✔ Check!'
-          : 'Press → and ← to move the long blue hand. ↑ and ↓ move the short red hand. Then press return!')
-        : `${plain(q.lines.join(' '))} ${MQ.isTouch ? 'Tap ✔ Check' : 'Press return'} when it's ready.`);
+      say('⏰ Move the hands!');
+      if (stats.asked <= 1 && g.played < 2) {
+        MQ.Voice.say(MQ.isTouch
+          ? 'Drag the long blue hand and the short red hand with your finger. Then tap Check!'
+          : 'The left and right arrows move the long blue hand. Up and down move the short red hand. Then press return!', 'en-US');
+      }
     } else {
-      say(`${plain(q.lines.join(' '))} ${MQ.isTouch ? 'Tap your answer.' : 'Pick with ← → and press return.'}`);
+      say(MQ.isTouch ? '👆 Tap an answer!' : '👆 Pick one!');
+      if (stats.asked <= 2 && g.played < 2 && !MQ.isTouch) MQ.Voice.say('Pick with the arrows and press return.', 'en-US');
     }
   }
 
@@ -861,7 +865,8 @@
   function onRight() {
     MQ.Sound.correct();
     wrongStreak = 0;
-    if (!floorMissed) { firstTry++; starWindows.push(floor + 1); }
+    const floorMissedBefore = floorMissed;
+    if (!floorMissed) { firstTry++; starWindows.push(floor + 1); pendingStar = floor + 1; }
     floor++;
     floorMissed = false;
     climbTo(floor);
@@ -871,12 +876,17 @@
     const zhPart = q.zhAfter || (q.mode === 'set' ? q.zh : '');
     fbZh = data.settings.chinese ? `${praise.zh} ${zhPart}` : '';
     revealClock(false);
+    heroMood.pose = 'happy';
+    heroMood.until = time + 1.6;
+    // Block burst where the hero lands, a sparkle on the clock, and (first try) a ⭐ that flies to its window.
     const p = heroScreen(floor);
-    burst(p.x, p.y, '#ffd23f', 18);
-    floaters.push({ x: p.x + (mode === 'portrait' ? 0 : 30), y: p.y - (mode === 'portrait' ? 26 : 20), text: floor >= FLOORS ? 'Top!' : `+1 🪟`, life: 1.2 });
+    const up = heroHalf();
+    blocks.burst(p.x, p.y - up, ['#ffd23f', '#f6b93b', '#4cd137', '#48b0f7', '#ff7f50'], isPhone() ? 12 : 18, isPhone() ? 0.55 : 0.8);
+    floaters.push({ x: p.x + (mode === 'portrait' ? 0 : 34), y: p.y - up * 2 - 6, text: floor >= FLOORS ? 'Top!' : `+1 🪟`, life: 1.2 });
     const c = clockToScreen(CX, CY - R * 0.3);
     burst(c.x, c.y, '#ffe27a', 14);
-    say(`${praise.zh} ${praise.en} ${floor >= FLOORS ? 'You reached the top!' : `Floor ${floor}!`}`);
+    if (!floorMissedBefore) flyStarTo(p.x, p.y - up, floor);
+    say(floor >= FLOORS ? '🔔 The top!' : `✔ Floor ${floor}!`);
     // Two short phrases: the praise is the same every time, so it is ready instantly after the first time.
     if (data.settings.chinese) { MQ.Voice.say(praise.zh, 'zh-CN', { interrupt: true }); MQ.Voice.say(zhPart, 'zh-CN'); }
     else MQ.Voice.say(praise.en, 'en-US', { interrupt: true });
@@ -899,9 +909,12 @@
       fbLines = [`${opener} You made ${yours}. This is {${q.answerText}}:`, ...q.explain];
     }
     revealClock(true);
-    const cheer = wrongStreak >= 2 ? ` ${MQ.CHEER.zh} (${MQ.CHEER.py})` : '';
-    say(`Look at the clock: this is ${q.answerText}.${cheer} We'll try one like this again soon. ${MQ.isTouch ? 'Tap Next ▶' : 'Press return'} to go on.`);
+    heroMood.pose = 'oops';
+    heroMood.until = time + 1.1;
+    wobbleAt = time;
+    say(wrongStreak >= 2 ? `💪 ${MQ.CHEER.zh}! Look at the clock` : '👀 Look at the clock!');
     MQ.Voice.say(`${opener} The answer is ${q.answerSpeak || speakTime(q.target)}.`, 'en-US', { interrupt: true });
+    if (g.played < 2) MQ.Voice.say(MQ.isTouch ? 'Tap Next to go on.' : 'Press return to go on.', 'en-US');
   }
 
   function advance(minWait = 0.35) {
@@ -918,6 +931,7 @@
     MQ.Sound.note(88, 'bell', { dur: 0.8, vel: 0.1 });
     labelFlashUntil = time + 4;
     let text;
+    let cap;
     if (q.type === 'set') {
       const m = minOf(q.target);
       const ticks = m % 5;
@@ -927,22 +941,28 @@
         hintUntil = time + 3;
         if (!floorMissed) { floorMissed = true; updateHud(); }
         text = `Look for the glowing hands! The long hand goes to ${spot}. This floor won't get a star.`;
+        cap = '💡 Look for the glowing hands!';
       } else {
         // First hint: words and the glowing minute numbers only.
         text = `Count by 5s on the yellow numbers. The long hand goes to ${spot}. Need more help? Hint again.`;
+        cap = '💡 Count by 5s!';
       }
     } else if (q.type === 'read') {
       text = 'First look at the short red hand: which number did it pass? Then count the long blue hand by 5s.';
+      cap = '💡 Short red hand first!';
     } else if (q.type === 'words') {
       text = "Quarter = 15 minutes. Half = 30 minutes. 'Past' means after the hour, 'to' means before the next hour.";
+      cap = '💡 Quarter = 15 · half = 30';
     } else if (q.type === 'elapsed') {
       text = q.variant === 'earlier'
         ? 'Count backward! Each number on the clock is 5 minutes. 60 minutes = 1 hour.'
         : 'Count on from the start time. Each number on the clock is 5 minutes. 60 minutes = 1 hour.';
+      cap = q.variant === 'earlier' ? '💡 Count back by 5s!' : '💡 Count on by 5s!';
     } else {
       text = 'a.m. = morning, before lunch ☀️. p.m. = afternoon and night 🌙.';
+      cap = '💡 a.m. ☀️ · p.m. 🌙';
     }
-    say(`💡 ${text}`, { speak: true });
+    say(cap, text);
     if (isPhone()) toast(`💡 ${text}`, 7);
   }
 
@@ -967,7 +987,7 @@
     fbLines = ['🔔 You reached the top of the tower!', 'Ring the big bell!'];
     fbZh = data.settings.chinese ? '敲钟啦!' : '';
     updateHud();
-    say('🔔 You made it to the top! Ding, dong!');
+    say('🔔 Ding, dong!');
     for (let i = 0; i < 3; i++) {
       setTimeout(() => {
         MQ.Sound.note(48, 'bell', { dur: 3, vel: 0.25 });
@@ -975,6 +995,7 @@
         bellAmp = 1;
         const b = towerToScreen(T_CX, 160);
         burst(b.x, b.y, '#ffe27a', 16);
+        if (i === 0) { heroMood.pose = 'happy'; heroMood.until = time + 99; }
       }, 700 + i * 950);
     }
     setTimeout(() => {
@@ -982,7 +1003,7 @@
       for (let i = 0; i < 6; i++) {
         setTimeout(() => (isPhone()
           ? confetti(rand(Math.round(LW * 0.1), Math.round(LW * 0.9)), rand(Math.round(LH * 0.2), Math.round(LH * 0.55)))
-          : confetti(rand(300, 1000), rand(160, 420))), i * 140);
+          : confetti(rand(Math.round(LW * 0.28), Math.round(LW * 0.95)), rand(160, 420))), i * 140);
       }
       const praise = MQ.pick(MQ.PRAISE);
       if (data.settings.chinese) MQ.Voice.say(praise.zh, 'zh-CN', { interrupt: true });
@@ -1040,7 +1061,7 @@
     const mins = Math.max(1, Math.round(stats.seconds / 60));
     showOverlay(`
       <div class="card">
-        <h2>🔔 Level ${level}</h2>
+        <h2>${MQ.Art.img(heroId, 64, 'card-hero')} 🔔 Level ${level}</h2>
         <div class="stars-row">${starHtml}</div>
         <div class="praise"><span class="zh">${praise.zh}</span><small>${praise.py} · ${praise.en}</small></div>
         <div class="stats">
@@ -1050,14 +1071,14 @@
           ${stats.hints ? `<span>💡 ${stats.hints}</span>` : ''}
         </div>
         <div class="next">${move.pic}</div>
-        ${newHero ? `<div class="next">🎉 ${newHero.emoji} ${MQ.escapeHtml(newHero.name)}</div>` : ''}
+        ${newHero ? `<div class="next new-hero">🎉 ${MQ.Art.img(newHero.id, 60)} ${MQ.escapeHtml(newHero.name)}</div>` : ''}
         <div class="btn-row">
           <button class="btn start" id="again">Again ▶</button>
           <a class="btn secondary home-link phone-only" href="../../index.html">🏠 Portal</a>
         </div>
         <div class="press keys-only">Press <span class="key">return</span></div>
       </div>`,
-      (k) => { if (k === 'Enter' || k === ' ') nextRound(); }
+      (k) => { if (k === 'Enter' || k === ' ') nextRound(); else if (k === 'Escape') goHome(); }
     );
     el('again').addEventListener('click', nextRound);
   }
@@ -1068,33 +1089,53 @@
   }
 
   // ---------- HUD ----------
+  // Only touches the DOM when something changed (called on events, never per frame).
+  let hudSig = '';
+  function setText(id, v) { const e = el(id); if (e.textContent !== String(v)) e.textContent = v; }
   function updateHud() {
-    el('level').textContent = g.level;
-    el('stars').textContent = data.stars;
-    el('windows').innerHTML = Array.from({ length: FLOORS }, (_, i) => {
+    setText('level', g.level);
+    setText('stars', data.stars);
+    setText('plevel', g.level);
+    setText('pstars', data.stars);
+    const wins = Array.from({ length: FLOORS }, (_, i) => {
       const k = i + 1;
-      const cls = k <= floor ? 'win lit' : k === floor + 1 && state === 'play' ? 'win next' : 'win';
-      return `<span class="${cls}">${starWindows.includes(k) ? '⭐' : ''}</span>`;
-    }).join('');
-    el('floor').textContent = floor >= FLOORS ? 'Top of the tower! 🔔' : `Floor ${floor} of ${FLOORS}`;
-    el('skill').textContent = state === 'celebrate' || state === 'result' ? '🔔 Ring the bell!' : q ? SKILL_TAG[q.type] : '🕰️ Clock Tower';
-    el('level-title').textContent = `Level ${g.level}: ${cfgFor(g.level).title}`;
-    el('plevel').textContent = g.level;
-    el('pstars').textContent = data.stars;
+      const lit = k <= floor || state === 'celebrate' || state === 'result';
+      const cls = lit ? 'win lit' : k === floor + 1 && state === 'play' ? 'win next' : 'win';
+      const star = starWindows.includes(k) && k !== pendingStar ? '<span class="st">⭐</span>' : '';
+      return `<span class="${cls}">${star}</span>`;
+    }).join('') + '<span class="bell">🔔</span>';
+    if (wins !== hudSig) { el('windows').innerHTML = wins; hudSig = wins; }
     const musicOn = data.settings.music !== false;
     for (const id of ['pmusic', 'tmusic']) {
-      el(id).textContent = musicOn ? '🎵' : '🔇';
+      setText(id, musicOn ? '🎵' : '🔇');
       el(id).classList.toggle('off', !musicOn);
     }
   }
 
-  function say(text, { speak = false } = {}) {
-    el('message').textContent = text;
-    const b = el('bubble');
+  // The laptop caption: a few big words. `speak` (optional) is the full sentence, read aloud.
+  function say(cap, speak) {
+    const b = el('caption');
+    b.textContent = cap;
     b.classList.remove('pop');
     void b.offsetWidth;
     b.classList.add('pop');
-    if (speak) MQ.Voice.say(text.replace(/\p{Extended_Pictographic}/gu, ''), 'en-US', { interrupt: true });
+    if (speak) MQ.Voice.say(speak.replace(/\p{Extended_Pictographic}/gu, ''), 'en-US', { interrupt: true });
+  }
+
+  // A ⭐ flies from the hero (board point) to that window in the top bar (phones: to the ⭐ counter).
+  function flyStarTo(x, y, k) {
+    const r = canvas.getBoundingClientRect();
+    const px = r.left + (x / LW) * r.width;
+    const py = r.top + (y / LH) * r.height;
+    const target = isPhone() ? el('pstars').parentElement : el('windows').children[k - 1];
+    MQ.FX.flyStar(px, py, target, { delay: 150 });
+    setTimeout(() => { if (pendingStar === k) { pendingStar = 0; updateHud(); } }, 950);
+  }
+  // Half the hero's height on screen (for effects that start at his middle).
+  function heroHalf() {
+    if (mode === 'portrait') return 16;
+    if (mode === 'landscape') return 30 * towerXform().s;
+    return 30;
   }
 
   // ---------- Input ----------
@@ -1136,7 +1177,7 @@
   function nudgePick() {
     MQ.Sound.click();
     const text = MQ.isTouch ? '👆 Tap an answer first!' : 'Pick an answer first — use ← →';
-    say(text);
+    say(MQ.isTouch ? '👆 Tap an answer first!' : '👆 Pick an answer first!');
     MQ.Voice.say(MQ.isTouch ? 'Tap an answer first!' : 'Pick an answer first!', 'en-US', { interrupt: true });
     if (isPhone()) toast(text, 2.5);
   }
@@ -1145,7 +1186,7 @@
   function nudgeMove() {
     MQ.Sound.click();
     const text = MQ.isTouch ? '👆 Drag the hands first!' : 'Move the hands first! ← → ↑ ↓';
-    say(text);
+    say(MQ.isTouch ? '👆 Drag the hands first!' : 'Move the hands first!');
     MQ.Voice.say(MQ.isTouch ? 'Drag the hands first!' : 'Move the hands first!', 'en-US', { interrupt: true });
     if (isPhone()) toast(text, 2.5);
     bannerPulseAt = time;
@@ -1163,7 +1204,7 @@
     updateHud();
   }
 
-  // On-screen pause + music buttons (phone HUD, and the side panel on touch tablets).
+  // On-screen pause + music buttons (phone HUD, and the top bar on touch tablets).
   for (const id of ['ppause', 'tpause']) {
     el(id).addEventListener('click', () => { MQ.Sound.click(); if (state === 'play') showPause(); });
   }
@@ -1306,7 +1347,9 @@
     overlay.innerHTML = html;
     overlay.hidden = false;
     overlayKeys = keys;
+    MQ.FX.popIn(overlay.querySelector('.card'));
   }
+  function goHome() { persist(); location.href = '../../index.html'; }
   function hideOverlay() {
     overlay.hidden = true;
     overlay.innerHTML = '';
@@ -1332,19 +1375,19 @@
       </div>`;
     showOverlay(`
       <div class="card intro-card">
-        <h1>${hero} Level ${g.level}</h1>
+        <h1>${MQ.Art.img(heroId, 76, 'card-hero')} Level ${g.level}</h1>
         <div class="goal-pic">${goal}</div>
         ${first ? hands : ''}
         <button class="btn start" id="go">Start ▶</button>
         <div class="press keys-only">Press <span class="key">return</span></div>
       </div>`,
-      (k) => { if (k === 'Enter' || k === ' ') startPlay(); }
+      (k) => { if (k === 'Enter' || k === ' ') startPlay(); else if (k === 'Escape') goHome(); }
     );
     el('go').addEventListener('click', startPlay);
     let talk = `Level ${g.level}. ${cfg.speak || cfg.title.replace('&', 'and')}`;
     if (first) talk += ' The long blue hand shows the minutes. The short red hand shows the hour. Every right answer lights a window. Climb to the top and ring the bell!';
     MQ.Voice.say(talk, 'en-US', { interrupt: true });
-    say(`Level ${g.level}: ${cfg.title}. ${MQ.isTouch ? 'Tap Start!' : 'Press return!'}`);
+    say(`Level ${g.level}`);
     updateHud();
   }
 
@@ -1360,23 +1403,26 @@
     drag = null;
     stopHold();
     MQ.Voice.stop();
+    // Two big buttons, each with its key: return = keep playing, esc = home (so esc, esc = home).
     let sel2 = 0;
-    const items = [['▶ Keep playing', () => { hideOverlay(); state = 'play'; MQ.Sound.click(); }], ['🏠 Back to the portal', () => { persist(); location.href = '../../index.html'; }]];
-    const render = () => {
-      showOverlay(`
-        <div class="card">
-          <h2>⏸ Paused</h2>
-          <div class="menu">${items.map((it, i) => `<button class="btn ${i === 0 ? '' : 'secondary'} ${i === sel2 ? 'sel' : ''}" data-i="${i}">${it[0]}</button>`).join('')}</div>
-          <div class="press keys-only">Use <span class="key">↑</span> <span class="key">↓</span> and <span class="key">return</span></div>
-        </div>`,
-        (k) => {
-          if (k === 'ArrowUp' || k === 'ArrowDown') { sel2 = 1 - sel2; render(); }
-          else if (k === 'Enter' || k === ' ') items[sel2][1]();
-          else if (k === 'Escape') items[0][1]();
-        });
-      overlay.querySelectorAll('.menu .btn').forEach((b) => b.addEventListener('click', () => items[Number(b.dataset.i)][1]()));
-    };
-    render();
+    const items = [
+      ['▶ Play', 'return', () => { hideOverlay(); state = 'play'; MQ.Sound.click(); }],
+      ['🏠 Home', 'esc', goHome],
+    ];
+    showOverlay(`
+      <div class="card pause-card">
+        <h2>⏸ Paused</h2>
+        <div class="menu">${items.map((it, i) => `<button class="btn big ${i === 0 ? '' : 'secondary'} ${i === sel2 ? 'sel' : ''}" data-i="${i}"><span>${it[0]}</span><span class="key keys-only">${it[1]}</span></button>`).join('')}</div>
+      </div>`,
+      (k) => {
+        if (k.startsWith('Arrow')) {
+          sel2 = 1 - sel2;
+          MQ.Sound.click();
+          overlay.querySelectorAll('.menu .btn').forEach((b, i) => b.classList.toggle('sel', i === sel2));
+        } else if (k === 'Enter' || k === ' ') items[sel2][2]();
+        else if (k === 'Escape') goHome();
+      });
+    overlay.querySelectorAll('.menu .btn').forEach((b) => b.addEventListener('click', () => items[Number(b.dataset.i)][2]()));
   }
 
   // ---------- Effects ----------
@@ -1407,6 +1453,15 @@
     { x: 850, w: 56, h: 34, wall: '#f6d7b0', roof: '#2e9e5b' },
     { x: 930, w: 44, h: 38, wall: '#fbe7c6', roof: '#e08a3c' },
     { x: 986, w: 50, h: 32, wall: '#f4dcc0', roof: '#7a3fb0' },
+    // Only seen on wide laptop screens:
+    { x: 1062, w: 46, h: 44, wall: '#fbe7c6', roof: '#2e9e5b' },
+    { x: 1128, w: 58, h: 36, wall: '#f6d7b0', roof: '#d9534f' },
+    { x: 1204, w: 42, h: 50, wall: '#f4dcc0', roof: '#2f6fd6' },
+    { x: 1268, w: 54, h: 34, wall: '#fbe7c6', roof: '#e08a3c' },
+    { x: 1340, w: 46, h: 46, wall: '#f6d7b0', roof: '#7a3fb0' },
+    { x: 1410, w: 56, h: 36, wall: '#fbe7c6', roof: '#d9534f' },
+    { x: 1484, w: 44, h: 42, wall: '#f4dcc0', roof: '#2e9e5b' },
+    { x: 1550, w: 54, h: 34, wall: '#f6d7b0', roof: '#2f6fd6' },
   ];
 
   function mixColor(a, b, t) {
@@ -1415,18 +1470,60 @@
     return `rgb(${pa.map((v, i) => Math.round(lerp(v, pb[i], t))).join(',')})`;
   }
 
+  // Laptop: the parts of the picture that don't move are painted once into cached layers.
+  function renderLayer(c, ox, oy, w, h, fn) {
+    c = c || document.createElement('canvas');
+    const pw = Math.ceil(w * pixelScale);
+    const ph = Math.ceil(h * pixelScale);
+    if (c.width !== pw || c.height !== ph) { c.width = pw; c.height = ph; }
+    const saved = ctx;
+    ctx = c.getContext('2d');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, pw, ph);
+    ctx.setTransform(pixelScale, 0, 0, pixelScale, -ox * pixelScale, -oy * pixelScale);
+    try { fn(); } finally { ctx = saved; }
+    c.ox = ox;
+    c.oy = oy;
+    return c;
+  }
+  function blit(c) {
+    const m = ctx.getTransform();
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(c, Math.round(m.a * c.ox + m.e), Math.round(m.d * c.oy + m.f));
+    ctx.restore();
+  }
+  const cache = { sky: null, skyK: -1, tower: null, face: null, dial: null };
+  function dropCaches() { cache.sky = cache.tower = cache.face = cache.dial = null; cache.skyK = -1; }
+  const useCache = () => !isPhone() && ctx.canvas === canvas;
+
   function drawSky() {
-    // Morning blue slowly warms to golden hour as he climbs.
     const k = skyProgress;
+    if (useCache()) {
+      const kq = Math.round(k * 40) / 40;
+      if (!cache.sky || cache.skyK !== kq) {
+        cache.sky = renderLayer(cache.sky, 0, 0, LW, H, () => drawSkyStatic(kq, LW));
+        cache.skyK = kq;
+      }
+      blit(cache.sky);
+    } else {
+      drawSkyStatic(k, W);
+    }
+    drawSkyLive(k);
+  }
+
+  // Sky gradient, sun, hills, village and grass (SW = scene width).
+  function drawSkyStatic(k, SW) {
+    // Morning blue slowly warms to golden hour as he climbs.
     const sky = ctx.createLinearGradient(0, 0, 0, H);
     sky.addColorStop(0, mixColor('#7cc4ff', '#8f9be8', k));
     sky.addColorStop(0.55, mixColor('#cdeaff', '#ffc98f', k));
     sky.addColorStop(1, mixColor('#fff3dc', '#ffe0a8', k));
     ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(0, 0, SW, H);
 
     // Sun: rises a little higher and turns golden.
-    const sx = 960;
+    const sx = SW - 80;
     const sy = lerp(250, 300, k);
     const sun = ctx.createRadialGradient(sx, sy, 10, sx, sy, 110);
     sun.addColorStop(0, `rgba(255,${Math.round(lerp(246, 214, k))},${Math.round(lerp(190, 120, k))},0.95)`);
@@ -1435,9 +1532,44 @@
     ctx.fillStyle = sun;
     ctx.fillRect(sx - 120, sy - 120, 240, 240);
 
-    // Clouds
+    // Rolling hills and a little village
+    ctx.fillStyle = mixColor('#a8dc8c', '#b9c77a', k);
+    ctx.beginPath();
+    ctx.moveTo(0, H);
+    ctx.lineTo(0, 690);
+    ctx.quadraticCurveTo(300, 640, 560, 684);
+    ctx.quadraticCurveTo(820, 720, 1040, 660);
+    if (SW > W) ctx.quadraticCurveTo(1040 + (SW - W) * 0.5, 630, SW, 676);
+    ctx.lineTo(SW, H);
+    ctx.closePath();
+    ctx.fill();
+    for (const h of HOUSES) {
+      if (h.x > SW) continue;
+      const y = GROUND + 4 - h.h;
+      ctx.fillStyle = h.wall;
+      ctx.fillRect(h.x, y, h.w, h.h);
+      ctx.fillStyle = h.roof;
+      ctx.beginPath();
+      ctx.moveTo(h.x - 6, y + 2);
+      ctx.lineTo(h.x + h.w / 2, y - 22);
+      ctx.lineTo(h.x + h.w + 6, y + 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = k > 0.5 ? '#ffd766' : '#8fc3ea';
+      ctx.fillRect(h.x + 8, y + 10, 12, 12);
+      ctx.fillStyle = '#8a5a2b';
+      ctx.fillRect(h.x + h.w - 20, y + h.h - 22, 12, 22);
+    }
+    ctx.fillStyle = mixColor('#7fc860', '#9fb858', k);
+    ctx.fillRect(0, GROUND, SW, H - GROUND);
+    ctx.fillStyle = mixColor('#6fb851', '#8ea84c', k);
+    for (let x = 6; x < SW; x += 18) ctx.fillRect(x, GROUND, 8, 4);
+  }
+
+  // Clouds drift and birds flap (drawn every frame).
+  function drawSkyLive(k) {
+    ctx.fillStyle = `rgba(255,255,255,${lerp(0.9, 0.75, k)})`;
     for (const c of clouds) {
-      ctx.fillStyle = `rgba(255,255,255,${lerp(0.9, 0.75, k)})`;
       ctx.beginPath();
       ctx.ellipse(c.x, c.y, 46 * c.s, 18 * c.s, 0, 0, Math.PI * 2);
       ctx.ellipse(c.x - 26 * c.s, c.y + 4 * c.s, 26 * c.s, 14 * c.s, 0, 0, Math.PI * 2);
@@ -1456,37 +1588,6 @@
       ctx.quadraticCurveTo(b.x + 3, b.y - 2, b.x + 8, b.y - f);
       ctx.stroke();
     }
-
-    // Rolling hills and a little village
-    ctx.fillStyle = mixColor('#a8dc8c', '#b9c77a', k);
-    ctx.beginPath();
-    ctx.moveTo(0, H);
-    ctx.lineTo(0, 690);
-    ctx.quadraticCurveTo(300, 640, 560, 684);
-    ctx.quadraticCurveTo(820, 720, 1040, 660);
-    ctx.lineTo(W, H);
-    ctx.closePath();
-    ctx.fill();
-    for (const h of HOUSES) {
-      const y = GROUND + 4 - h.h;
-      ctx.fillStyle = h.wall;
-      ctx.fillRect(h.x, y, h.w, h.h);
-      ctx.fillStyle = h.roof;
-      ctx.beginPath();
-      ctx.moveTo(h.x - 6, y + 2);
-      ctx.lineTo(h.x + h.w / 2, y - 22);
-      ctx.lineTo(h.x + h.w + 6, y + 2);
-      ctx.closePath();
-      ctx.fill();
-      ctx.fillStyle = k > 0.5 ? '#ffd766' : '#8fc3ea';
-      ctx.fillRect(h.x + 8, y + 10, 12, 12);
-      ctx.fillStyle = '#8a5a2b';
-      ctx.fillRect(h.x + h.w - 20, y + h.h - 22, 12, 22);
-    }
-    ctx.fillStyle = mixColor('#7fc860', '#9fb858', k);
-    ctx.fillRect(0, GROUND, W, H - GROUND);
-    ctx.fillStyle = mixColor('#6fb851', '#8ea84c', k);
-    for (let x = 6; x < W; x += 18) ctx.fillRect(x, GROUND, 8, 4);
   }
 
   // ---------- Drawing helpers ----------
@@ -1522,11 +1623,12 @@
   }
 
   function windowPos(k) { return { x: T_CX + (k % 2 ? -38 : 38), y: GROUND - 98 - (k - 1) * 56 }; }
+  // Where the hero's feet are: at the door, on a window sill, or up in the belfry.
   function heroPos(f) {
-    if (f <= 0) return { x: T_CX, y: GROUND - 30 };
-    if (f > FLOORS) return { x: T_CX - 58, y: 178 };
+    if (f <= 0) return { x: T_CX, y: GROUND - 2 };
+    if (f > FLOORS) return { x: T_CX - 58, y: 198 };
     const w = windowPos(f);
-    return { x: w.x, y: w.y + 2 };
+    return { x: w.x, y: w.y + 24 };
   }
 
   // Stable pseudo-random stone shades.
@@ -1536,6 +1638,16 @@
   };
 
   function drawTower() {
+    if (useCache()) {
+      if (!cache.tower) cache.tower = renderLayer(null, T_LEFT - 60, T_TOP - 4, T_RIGHT - T_LEFT + 140, GROUND - T_TOP + 24, drawTowerBody);
+      blit(cache.tower);
+    } else {
+      drawTowerBody();
+    }
+    drawTowerParts();
+  }
+  // The stone body (never changes).
+  function drawTowerBody() {
     const w = T_RIGHT - T_LEFT;
     const bodyH = GROUND - T_TOP;
     // Soft shadow on the ground
@@ -1570,7 +1682,9 @@
     ctx.strokeStyle = '#8f6f4a';
     roundRect(T_LEFT, T_TOP, w, bodyH + 2, 6);
     ctx.stroke();
-
+  }
+  // Windows, door and belfry.
+  function drawTowerParts() {
     // Windows (arched), lit ones glow warmly
     for (let k = 1; k <= FLOORS; k++) drawWindow(k);
 
@@ -1779,18 +1893,22 @@
     ctx.fill();
   }
 
+  // The block-animal hero: idle / happy / oops poses, squash-and-stretch hops, a small wobble when wrong.
+  function heroPose() {
+    if (time < heroMood.until) return heroMood.pose;
+    return 'idle';
+  }
+  function drawHeroAt(x, y, size, hopH) {
+    const hop = heroAnim.t < 1 ? MQ.FX.hopShape(heroAnim.t) : { sx: 1, sy: 1, lift: 0 };
+    const w = time - wobbleAt;
+    const tilt = w < 0.7 ? Math.sin(w * 22) * 0.13 * (1 - w / 0.7) : 0;
+    MQ.Art.drawHero(ctx, heroId, x, y, size, { pose: heroPose(), t: time, sx: hop.sx, sy: hop.sy, lift: hop.lift * hopH, tilt });
+  }
   function drawHero() {
-    const e = ease(Math.min(1, heroAnim.t));
+    const e = MQ.FX.ease.inOut(Math.min(1, heroAnim.t));
     const a = heroPos(Math.round(heroAnim.from));
     const b = heroPos(heroAnim.to);
-    const x = lerp(a.x, b.x, e);
-    const y = lerp(a.y, b.y, e) - Math.sin(Math.PI * Math.min(1, heroAnim.t)) * 34;
-    const bob = heroAnim.t >= 1 ? Math.sin(time * 3) * 1.5 : 0;
-    ctx.font = `38px ${EMOJI_FONT}`;
-    ctx.fillStyle = '#000';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(hero, x, y + bob);
+    drawHeroAt(lerp(a.x, b.x, e), lerp(a.y, b.y, e), 64, 38);
   }
 
   // ---------- The big clock ----------
@@ -1843,6 +1961,29 @@
   }
 
   function drawClock() {
+    const ox = CX - R - 40;
+    const oy = CY - R - 40;
+    const size = 2 * R + 80;
+    if (useCache()) {
+      if (!cache.face) cache.face = renderLayer(null, ox, oy, size, size, drawClockFace);
+      blit(cache.face);
+    } else {
+      drawClockFace();
+    }
+
+    // Elapsed-time wedge
+    if (q && q.wedge && q.wedgeFrom != null && (phase === 'feedback' || (phase === 'ask' && q.mode === 'set'))) drawWedge();
+
+    if (useCache()) {
+      if (!cache.dial) cache.dial = renderLayer(null, ox, oy, size, size, drawClockDial);
+      blit(cache.dial);
+    } else {
+      drawClockDial();
+    }
+    drawClockTop();
+  }
+  // Shadow, brass bezel and face.
+  function drawClockFace() {
     // Shadow + brass bezel
     ctx.fillStyle = 'rgba(50,40,80,0.22)';
     ctx.beginPath(); ctx.arc(CX + 6, CY + 10, R + 20, 0, Math.PI * 2); ctx.fill();
@@ -1868,10 +2009,9 @@
     face.addColorStop(1, '#f6e4bf');
     ctx.fillStyle = face;
     ctx.beginPath(); ctx.arc(CX, CY, R, 0, Math.PI * 2); ctx.fill();
-
-    // Elapsed-time wedge
-    if (q && q.wedge && q.wedgeFrom != null && (phase === 'feedback' || (phase === 'ask' && q.mode === 'set'))) drawWedge();
-
+  }
+  // Minute ticks and the numbers 1–12.
+  function drawClockDial() {
     // Minute ticks
     for (let i = 0; i < 60; i++) {
       const a = (i * 6 * Math.PI) / 180;
@@ -1896,7 +2036,11 @@
       const a = (n * 30 * Math.PI) / 180;
       ctx.fillText(String(n), CX + Math.sin(a) * (R - 58), CY - Math.cos(a) * (R - 58) + 2);
     }
-
+  }
+  // Labels, hands, counters and the centre cap (change every frame).
+  function drawClockTop() {
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
     // 5-minute labels outside the face (fade out at higher levels)
     const la = labelsAlpha();
     if (la > 0.01) {
@@ -2034,8 +2178,9 @@
     ctx.fillText(label, x, y);
   }
   // Which key moves which hand, drawn beside the clock with a tiny picture of each hand.
-  function drawHandKeys(x, w, top) {
-    button(x, top, w, 178, { fill: 'rgba(255,255,255,0.94)', edge: '#e2d8c6', shadow: 'rgba(0,0,0,0.08)' });
+  function drawHandKeys(x0, w, top) {
+    button(x0, top, w, 178, { fill: 'rgba(255,255,255,0.94)', edge: '#e2d8c6', shadow: 'rgba(0,0,0,0.08)' });
+    const x = x0 + Math.max(0, (w - 206) / 2); // content is 206 wide: centre it in a wider column
     const rows = [
       { y: top + 16, keys: ['←', '→'], color: MIN_COLOR, len: 92, width: 12, text: 'long hand' },
       { y: top + 100, keys: ['↑', '↓'], color: HOUR_COLOR, len: 60, width: 18, text: 'short hand' },
@@ -2098,10 +2243,12 @@
     ctx.stroke();
 
     const n = lines.length + (zhLine ? 1 : 0);
-    const main = lines.length === 1 && !zhLine ? 38 : lines.length === 1 ? 36 : n >= 4 ? 22 : n === 3 ? 27 : 32;
+    let main = lines.length === 1 && !zhLine ? 38 : lines.length === 1 ? 36 : n >= 4 ? 22 : n === 3 ? 27 : 32;
+    const heightFor = (m) => lines.length * m * 1.22 + (zhLine ? Math.min(28, m * 0.85) * 1.35 : 0);
+    while (heightFor(main) > b.h - 10 && main > 15) main -= 1;
     const zhSize = Math.min(28, main * 0.85);
     const lh = main * 1.22;
-    const total = lines.length * lh + (zhLine ? zhSize * 1.35 : 0);
+    const total = heightFor(main);
     let y = b.y + (b.h - total) / 2 + lh / 2;
     ctx.textBaseline = 'middle';
     lines.forEach((line, i) => {
@@ -2237,14 +2384,15 @@
       ctx.fillStyle = 'rgba(255,255,255,0.88)';
       roundRect(x, y, w, 44, 14);
       ctx.fill();
-      keycap(x + 24, y + 21, '←');
-      keycap(x + 60, y + 21, '→');
+      const kx = x + Math.max(0, (w - 206) / 2);
+      keycap(kx + 24, y + 21, '←');
+      keycap(kx + 60, y + 21, '→');
       ctx.fillStyle = '#4a4458';
       ctx.font = `800 16px ${UI_FONT}`;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      ctx.fillText('pick', x + 82, y + 21);
-      keycap(x + 164, y + 21, 'return', 64);
+      ctx.fillText('pick', kx + 82, y + 21);
+      keycap(kx + 164, y + 21, 'return', 64);
       const hy = y + 56;
       button(x + 38, hy, w - 76, 46, { fill: '#fffbe6', edge: '#ffe08a', shadow: '#e8d489' });
       ctx.fillStyle = '#7a5a00';
@@ -2277,6 +2425,7 @@
   }
 
   function drawEffects() {
+    blocks.draw(ctx);
     for (const p of particles) {
       ctx.globalAlpha = Math.max(0, Math.min(1, p.life));
       ctx.fillStyle = p.color;
@@ -2360,7 +2509,7 @@
     return { s: lerp(a.s, b.s, k), ox: lerp(a.ox, b.ox, k), oy: lerp(a.oy, b.oy, k) };
   }
   function towerToScreen(x, y) {
-    if (!isPhone()) return { x, y };
+    if (!isPhone()) return { x: x + TX, y };
     const t = towerXform();
     return { x: t.ox + x * t.s, y: t.oy + y * t.s };
   }
@@ -2370,7 +2519,7 @@
     return { x: PL.cx + (x - CX) * s, y: PL.cy + (y - CY) * s };
   }
   function heroScreen(f) {
-    if (!isPhone()) return heroPos(f);
+    if (!isPhone()) { const p = heroPos(f); return { x: p.x + TX, y: p.y }; }
     if (mode === 'portrait' && towerK < 0.5) return stripPos(f);
     const p = heroPos(f);
     return towerToScreen(p.x, p.y);
@@ -2385,7 +2534,7 @@
   }
   function stripPos(f) {
     const { b, x0, step } = stripSlots();
-    const y = b.y + b.h / 2 + 1;
+    const y = b.y + b.h - 3; // the hero's feet
     if (f <= 0) return { x: b.x + 19, y };
     if (f > FLOORS) return { x: b.x + b.w - 20, y };
     return { x: x0 + step * (f - 0.5), y };
@@ -2478,15 +2627,10 @@
     ctx.fillText('🔔', 0, 0);
     ctx.restore();
     // The hero hops from window to window
-    const e = ease(Math.min(1, heroAnim.t));
+    const e = MQ.FX.ease.inOut(Math.min(1, heroAnim.t));
     const a = stripPos(Math.round(heroAnim.from));
     const c = stripPos(heroAnim.to);
-    const hx = lerp(a.x, c.x, e);
-    const hy = lerp(a.y, c.y, e) - Math.sin(Math.PI * Math.min(1, heroAnim.t)) * 16 + (heroAnim.t >= 1 ? Math.sin(time * 3) : 0);
-    ctx.font = `26px ${EMOJI_FONT}`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(hero, hx, hy);
+    drawHeroAt(lerp(a.x, c.x, e), lerp(a.y, c.y, e), 40, 18);
     ctx.restore();
   }
 
@@ -2980,10 +3124,12 @@
 
   function draw() {
     if (isPhone()) { drawPhone(); return; }
-    ctx.clearRect(0, 0, W, H);
     drawSky();
+    ctx.save();
+    ctx.translate(TX, 0);
     drawTower();
     drawHero();
+    ctx.restore();
     drawBanner();
     drawClock();
     drawColumn();
@@ -3007,8 +3153,9 @@
     const skyGoal = Math.min(1, floor / FLOORS);
     skyProgress += (skyGoal - skyProgress) * Math.min(1, dt * 1.5);
 
-    for (const c of clouds) { c.x += c.v * dt; if (c.x > W + 80) { c.x = 180; c.y = 150 + Math.random() * 120; } }
-    for (const b of birds) { b.x += b.v * dt; if (b.x > W + 20) { b.x = -20; b.y = 170 + Math.random() * 90; } }
+    const SW = isPhone() ? W : LW;
+    for (const c of clouds) { c.x += c.v * dt; if (c.x > SW + 80) { c.x = 180; c.y = 150 + Math.random() * 120; } }
+    for (const b of birds) { b.x += b.v * dt; if (b.x > SW + 20) { b.x = -20; b.y = 170 + Math.random() * 90; } }
 
     if (state === 'play') {
       stats.seconds += dt;
@@ -3018,6 +3165,7 @@
       if (phase === 'feedback' && autoNextAt && time >= autoNextAt) advance();
     }
 
+    blocks.update(dt);
     for (const p of particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 400 * dt; p.life -= dt; }
     particles = particles.filter((p) => p.life > 0);
     for (const f of floaters) { f.y -= 40 * dt; f.life -= dt; }
@@ -3025,8 +3173,9 @@
   }
 
   // ---------- Sizing (crisp on Retina screens) ----------
-  // Laptop-sized windows keep the original board + side panel. Anything smaller (phones, small
-  // tablets) gets a phone layout: portrait or landscape, filling the screen inside the safe areas.
+  // Laptop-sized windows get the board filling the window (760 tall, as wide as it fits) with a slim
+  // top bar over the sky. Anything smaller (phones, small tablets) gets a phone layout: portrait or
+  // landscape, filling the screen inside the safe areas.
   function pickMode() {
     const w = window.innerWidth;
     const h = window.innerHeight;
@@ -3035,30 +3184,58 @@
     return h >= w ? 'portrait' : 'landscape';
   }
 
+  // Laptop: share the extra width out (a little margin left of the tower, room either side of the
+  // clock, a wider answer column, more village on the right) and make room for the top bar.
+  function deskLayout(scale) {
+    const extra = LW - W;
+    TX = Math.round(extra * 0.15);
+    CX = 530 + TX + Math.round(extra * 0.25);
+    COL.w = 206 + Math.round(extra * 0.15);
+    COL.x = 818 + TX + Math.round(extra * 0.45);
+    BANNER.x = T_RIGHT + 40 + TX;
+    BANNER.w = COL.x + COL.w - BANNER.x;
+    const barBottom = (6 + 54 + 6) / scale; // the top bar is 54 CSS px tall, 6 px from the top
+    BANNER.y = Math.round(barBottom);
+    BANNER.h = Math.min(128, Math.round(CY - R - 55 - 4 - BANNER.y)); // stop above the ":00" label
+    const bar = el('topbar');
+    bar.style.left = `${Math.round(BANNER.x * scale)}px`;
+    bar.style.width = `${Math.round(BANNER.w * scale)}px`;
+    bar.classList.toggle('tight', BANNER.w * scale < 760);
+  }
+
   let pixelScale = 1;
   function resize() {
     mode = pickMode();
     document.documentElement.dataset.layout = mode;
     const dpr = window.devicePixelRatio || 1;
     const hud = el('phud');
+    dropCaches();
     if (mode === 'desk') {
-      LW = W;
-      LH = H;
       PL = null;
-      const narrow = window.innerWidth <= 860;
-      const availW = narrow ? window.innerWidth - 24 : window.innerWidth - 300 - 20 - 36;
-      const availH = narrow ? window.innerHeight * 0.7 : window.innerHeight - 24;
-      const scale = Math.max(0.4, Math.min(availW / W, availH / H, 1.5));
-      stage.style.width = `${Math.round(W * scale)}px`;
-      stage.style.height = `${Math.round(H * scale)}px`;
-      canvas.style.width = `${Math.round(W * scale)}px`;
-      canvas.style.height = `${Math.round(H * scale)}px`;
-      canvas.width = Math.round(W * scale * dpr);
-      canvas.height = Math.round(H * scale * dpr);
-      pixelScale = scale * dpr;
+      const availW = window.innerWidth - 16;
+      const availH = window.innerHeight - 16;
+      const scale = Math.max(0.4, Math.min(availW / W, availH / H, 1.6));
+      // Wider windows get a wider scene (more village), never a stretched one.
+      LW = Math.max(W, Math.min(Math.floor(availW / scale), Math.round(W * 1.6)));
+      LH = H;
+      const cw = Math.round(LW * scale);
+      const ch = Math.round(H * scale);
+      stage.style.width = `${cw}px`;
+      stage.style.height = `${ch}px`;
+      canvas.style.width = `${cw}px`;
+      canvas.style.height = `${ch}px`;
+      canvas.width = Math.round(cw * dpr);
+      canvas.height = Math.round(ch * dpr);
+      pixelScale = (cw * dpr) / LW;
       ctx.setTransform(pixelScale, 0, 0, pixelScale, 0, 0);
+      deskLayout(cw / LW);
       return;
     }
+    // Phones: the original board geometry, placed with transforms (see computeLayout).
+    TX = 0;
+    CX = 530;
+    Object.assign(COL, { x: 818, w: 206 });
+    Object.assign(BANNER, { x: 252, y: 12, w: 776, h: 128 });
     stage.style.width = '';
     stage.style.height = '';
     LW = Math.max(240, stage.clientWidth);
@@ -3119,6 +3296,17 @@
     setLevel(n) { g.level = n; cfg = cfgFor(n); updateHud(); },
     logic: { norm, T, fmt, hourAngle, minuteAngle, zhTime, zhDur, durText, wordsFor, cfgFor, makeQuestion, explainForward, explainBackward, shortest },
   };
+
+  // Keyboard players: after a few quiet seconds the keys for *this* moment float up (plus "esc 🏠").
+  MQ.Idle.attach(stage, {
+    delay: g.played < 2 ? 2500 : 4000,
+    active: () => state === 'play' && !!q && (phase === 'ask' || (phase === 'feedback' && !lastRight)),
+    keys: () => {
+      if (phase === 'feedback') return [['return'], 'next'];
+      if (q.mode === 'set') return [[['←', '→'], 'long hand'], [['↑', '↓'], 'short hand'], [['return'], 'check']];
+      return [[['←', '→'], 'pick'], [['return'], 'go']];
+    },
+  });
 
   resize();
   MQ.Music.play('minuet');

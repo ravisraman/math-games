@@ -13,6 +13,12 @@
     port: { cols: 7, rows: 10, castle: 120 },
     land: { cols: 13, rows: 8, castle: 112 },
   };
+  // Laptop (wide screen): the same 13 x 10 board as 'desk', but the scene is widened with
+  // scenery on both sides (MX board units each side) so it fills the screen. The hero can't
+  // go there and no gameplay changes: cars come and go through tunnels at the board's edges.
+  GRIDS.wide = GRIDS.desk;
+  let MX = 0; // scenery margin (board units) left and right of the playfield
+  let SW = 0; // whole scene width = W + 2 * MX
   let COLS, ROWS, CASTLE_H, W, H, START_ROW, START_COL, gridKey;
   const BANK_ROW = 0;
   function setGrid(key) {
@@ -22,6 +28,7 @@
     ROWS = gr.rows;
     CASTLE_H = gr.castle;
     W = COLS * CELL;
+    SW = W + 2 * MX;
     H = CASTLE_H + (ROWS - 1) * CELL;
     START_ROW = ROWS - 1;
     START_COL = Math.floor(COLS / 2);
@@ -29,14 +36,17 @@
   const rowTop = (r) => (r === BANK_ROW ? 0 : CASTLE_H + (r - 1) * CELL);
   const rowMid = (r) => (r === BANK_ROW ? CASTLE_H - Math.round(34 * CASTLE_H / 160) : rowTop(r) + CELL / 2);
 
-  // Screen layout: 'desk' (laptop, unchanged), 'port' (portrait phone), 'land' (landscape phone).
+  // Screen layout: 'wide' (laptop: slim top bar, big board), 'desk' (smaller windows, side panel),
+  // 'port' (portrait phone), 'land' (landscape phone).
   function layoutFor() {
     const vw = window.innerWidth;
     const vh = window.innerHeight;
     if (vw <= 700 && vh >= vw) return 'port';
     if (vh <= 520 && vw > vh) return 'land';
+    if (vw > 1000) return 'wide';
     return 'desk';
   }
+  const keyboardLayout = () => layout === 'desk' || layout === 'wide';
   let layout = layoutFor();
   function applyLayoutClass() {
     const root = document.documentElement;
@@ -68,12 +78,15 @@
     { level: 1, maxLevel: 1, played: 0, struggles: 0, goodStreak: 0, seconds: 0, history: [], quiz: {} },
     data.games[GAME_ID] || {}
   ));
-  const hero = data.player.hero || '🐥';
+  const heroId = MQ.heroId(data.player.hero);
+  MQ.Art.preload(heroId);
+  const HERO_SIZE = 62; // board units (a cell is 64); the old emoji was 46px
   function persist() { MQ.save(data); }
 
   // ---------- DOM ----------
   const canvas = document.getElementById('board');
-  const ctx = canvas.getContext('2d');
+  const screenCtx = canvas.getContext('2d');
+  let ctx = screenCtx; // swapped to the background canvas while static scenery is painted
   const stage = document.getElementById('stage');
   const overlay = document.getElementById('overlay');
   const el = (id) => document.getElementById(id);
@@ -171,6 +184,13 @@
   const WRONG_TRIES_FOR_HELP = 2;
   const MAX_CAR_SPEED = 1.8; // cells per second
 
+  const blocks = MQ.FX.blocks(); // Minecraft-style block bursts (coins, bonks, the castle)
+  // The hero's pose: 'idle' normally, 'happy' when he makes it, 'oops' for a moment after a slip.
+  let pose = { name: 'idle', from: 0, until: 0 };
+  function setPose(name, dur) { pose = { name, from: time, until: time + dur }; }
+  function oops() { setPose('oops', 0.7); }
+  let quizOpen = false; // a bonus question is waiting for an answer
+
   function total() { return pouch.reduce((s, c) => s + c.v, 0); }
   // Is the gate open (drawn raised and golden)? Levels 1-2: as soon as the amount is exact.
   // Level 3+: never while he is still collecting, so it can't tell him when he's done.
@@ -235,7 +255,8 @@
       v, r: cells[i].r, c: cells[i].c, taken: false, warned: false, bob: Math.random() * 6, fly: null,
     }));
 
-    player = { r: START_ROW, c: START_COL, fromR: START_ROW, fromC: START_COL, t: 1, inv: 0, land: 0 };
+    player = { r: START_ROW, c: START_COL, fromR: START_ROW, fromC: START_COL, t: 1, inv: 0, land: 0, face: 1 };
+    pose = { name: 'idle', from: 0, until: 0 };
     bgSeed = Math.floor(Math.random() * 1e9);
     bgCanvas = null;
     initAmbient();
@@ -284,6 +305,7 @@
     el('target-zh').textContent = data.settings.chinese ? MQ.zhMoney(target) : '';
     el('pouch-zh').textContent = data.settings.chinese ? MQ.zhMoney(t) : '';
     el('pouch-coins').innerHTML = pouch.map((c) => coinChip(c.v)).join('');
+    if (layout === 'wide') fitPouch();
     const need = el('need');
     const need2 = el('need2'); // compact copy for the phone HUD (next to the target)
     if (cfg.judge) {
@@ -313,24 +335,40 @@
     el('btn-back').classList.toggle('empty', pouch.length === 0);
   }
 
+  // Laptop top bar: the coin chips shrink to fit when the pouch gets full.
+  function fitPouch() {
+    const pc = el('pouch-coins');
+    pc.style.setProperty('--chip', 1);
+    pc.classList.remove('two-rows');
+    if (pc.scrollWidth <= pc.clientWidth + 1) return;
+    // Too many for one row: two rows of smaller chips, shrinking a little more if needed.
+    pc.classList.add('two-rows');
+    for (let z = 0.72; z >= 0.4; z -= 0.06) {
+      pc.style.setProperty('--chip', z.toFixed(2));
+      if (pc.scrollHeight <= pc.clientHeight + 1 && pc.scrollWidth <= pc.clientWidth + 1) break;
+    }
+  }
+
   // Phones show the panda's message as a toast over the board that fades after a moment.
   let toastTimer = 0;
   let toastLow = false;
-  function say(text, { speak = false } = {}) {
-    el('message').textContent = text;
+  // `caption` is the few big words he sees; `voice` (optional) is the whole sentence, read aloud.
+  function say(caption, voice) {
+    el('message').textContent = caption;
     const b = el('bubble');
     b.classList.remove('pop');
     void b.offsetWidth;
     b.classList.add('pop', 'show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => b.classList.remove('show'), 2600 + text.length * 45);
-    if (speak) MQ.Voice.say(text.replace(/\p{Extended_Pictographic}/gu, ''), 'en-US', { interrupt: true });
+    toastTimer = setTimeout(() => b.classList.remove('show'), 2600 + caption.length * 45);
+    if (voice) speak(voice);
   }
+  const W$ = (c) => MQ.moneyWords(c); // money read aloud: "86 cents"
 
   // Touch wording vs keyboard wording.
   let usedTouch = MQ.isTouch;
-  const touchUI = () => usedTouch || layout !== 'desk';
-  const PUT_BACK = () => (touchUI() ? 'Tap ↩ Put back' : 'Press SPACE');
+  const touchUI = () => usedTouch || !keyboardLayout();
+  const PUT_BACK_WORDS = () => (touchUI() ? 'Tap put back to put a coin back.' : 'Press space to put a coin back.');
   // Read something aloud in plain words (money as "86 cents", not "86¢").
   const speak = (text) => MQ.Voice.say(text, 'en-US', { interrupt: true });
 
@@ -346,9 +384,10 @@
     if (state === 'play') {
       if (DIRS[k] && !e.repeat) tryMove(...DIRS[k]);
       else if (k === ' ' && !e.repeat) putBack();
-      else if (k === 'Escape' || k === 'p') showPause();
+      else if ((k === 'Escape' || k === 'p') && !e.repeat) showPause();
       return;
     }
+    if (e.repeat && (k === 'Enter' || k === ' ' || k === 'Escape')) return; // a held key never skips a card
     if (overlayKeys) overlayKeys(k, e);
   });
 
@@ -383,8 +422,8 @@
 
   function boardPoint(e) {
     const rect = canvas.getBoundingClientRect();
-    const k = W / rect.width;
-    return { x: (e.clientX - rect.left) * k, y: (e.clientY - rect.top) * k, inside: e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom };
+    const k = SW / rect.width;
+    return { x: (e.clientX - rect.left) * k - MX, y: (e.clientY - rect.top) * k, inside: e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom };
   }
   function cellAt(x, y) {
     const r = y < CASTLE_H ? BANK_ROW : 1 + Math.floor((y - CASTLE_H) / CELL);
@@ -392,7 +431,7 @@
   }
   function boardInput(e) {
     if (e.target.closest && e.target.closest('.overlay, .touch-hint')) return false;
-    if (e.pointerType === 'mouse' && layout === 'desk') return false; // laptop: keyboard, as before
+    if (e.pointerType === 'mouse' && keyboardLayout()) return false; // laptop: keyboard, as before
     return true;
   }
 
@@ -484,13 +523,14 @@
     if (nr === BANK_ROW && !cfg.judge && total() !== target) {
       MQ.Sound.nope();
       const t = total();
-      if (t === 0) say('The castle is locked 🔒. Collect coins first!');
-      else if (needRevealed) say(`Locked 🔒! You have ${MQ.money(t, pouchFmt)}. You need ${MQ.money(target - t, targetFmt)} more.`);
-      else say(`Locked 🔒! You have ${MQ.money(t, pouchFmt)}, but the castle needs ${MQ.money(target, targetFmt)}.`);
+      if (t === 0) say('🔒 Get coins first!', 'The castle is locked. Collect coins first!');
+      else if (needRevealed) say(`🔒 Need ${MQ.money(target - t, targetFmt)} more`, `Locked! You have ${W$(t)}. You need ${W$(target - t)} more.`);
+      else say(`🔒 Not ${MQ.money(target, targetFmt)} yet`, `Locked! You have ${W$(t)}, but the castle needs ${W$(target)}.`);
       return;
     }
     player.fromR = player.r;
     player.fromC = player.c;
+    if (dc) player.face = dc;
     player.r = nr;
     player.c = nc;
     player.t = 0;
@@ -533,31 +573,30 @@
     floaters.push({ x, y: y - 24, text: 'Not yet!', life: 1.2, color: '#e07b00' });
     if (t === 0) {
       // Nothing in the pouch is not a wrong answer, just a reminder.
-      say(`Collect coins first! The castle needs ${MQ.money(target, targetFmt)}.`);
-      speak(`Collect some coins first! The castle needs ${MQ.moneyWords(target)}.`);
+      say('Get coins first!', `Collect some coins first! The castle needs ${MQ.moneyWords(target)}.`);
       return;
     }
     stats.wrongGate++;
     if (stats.wrongGate >= WRONG_TRIES_FOR_HELP) needRevealed = true;
     updateHud();
-    let text = `Not yet! You have ${MQ.money(t, pouchFmt)}. The castle needs ${MQ.money(target, targetFmt)}.`;
+    oops();
+    let text = 'Not yet! 🤔';
     let words = `Not yet! You have ${MQ.moneyWords(t)}. The castle needs ${MQ.moneyWords(target)}.`;
     if (!helpOn()) {
-      text += ' 🤔';
+      // no hint yet: he works it out
     } else if (t > target) {
-      text += ` That's ${MQ.money(t - target, targetFmt)} too many. ${PUT_BACK()} to put a coin back.`;
-      words += ` That's ${MQ.moneyWords(t - target)} too many. Put a coin back.`;
+      text = `${MQ.money(t - target, targetFmt)} too many! ↩`;
+      words += ` That's ${MQ.moneyWords(t - target)} too many. ${PUT_BACK_WORDS()}`;
     } else {
       const left = coins.filter((c) => !c.taken).map((c) => c.v);
-      text += ` You need ${MQ.money(target - t, targetFmt)} more.`;
+      text = `Need ${MQ.money(target - t, targetFmt)} more`;
       words += ` You need ${MQ.moneyWords(target - t)} more.`;
       if (!canMake(target - t, left)) {
-        text += ` The coins left can't make that — ${PUT_BACK()} to put a coin back.`;
-        words += ' The coins left can\'t make that. Put a coin back.';
+        text = `Need ${MQ.money(target - t, targetFmt)} · ↩ put back`;
+        words += ` The coins left can't make that. ${PUT_BACK_WORDS()}`;
       }
     }
-    say(text);
-    speak(words);
+    say(text, words);
   }
 
   function touchCoin(coin) {
@@ -565,37 +604,45 @@
     const name = COINS[coin.v].name;
     if (cfg.judge) { takeCoin(coin); return; }
     if (t === target) {
-      say(`You already have exactly ${MQ.money(t, pouchFmt)}! Hop up to the castle ⬆`);
+      say('Exactly! Hop up ⬆', `You already have exactly ${W$(t)}! Hop up to the castle.`);
       return;
     }
     if (t + coin.v > target) {
       MQ.Sound.nope();
       if (!coin.warned) { stats.overshoots++; coin.warned = true; }
       needRevealed = true;
-      say(`Too much! ${MQ.money(t, pouchFmt)} + a ${name} (${MQ.money(coin.v, 'cents')}) would be ${MQ.money(t + coin.v, pouchFmt)}. You only need ${MQ.money(target - t, targetFmt)} more.`);
+      oops();
+      say(`Too much! Need ${MQ.money(target - t, targetFmt)}`, `Too much! ${W$(t)} and a ${name} would be ${W$(t + coin.v)}. You only need ${W$(target - t)} more.`);
       updateHud();
       return;
     }
     coin.taken = true;
     pouch.push(coin);
     MQ.Sound.coin(coin.v);
-    const { x, y } = cellCenter(coin.r, coin.c);
-    burst(x, y, coin.v >= 100 ? '#6fcf6f' : '#ffd23f', 14);
-    floaters.push({ x, y: y - 20, text: `+${coin.v >= 100 ? MQ.dollars(coin.v) : coin.v + '¢'}`, life: 1 });
+    coinPop(coin);
     const now = total();
     updateHud();
     if (now === target) {
       MQ.Sound.open();
-      say(`You made ${MQ.money(now, targetFmt)}! The castle gate is open — hop to the top! ⬆`);
-      MQ.Voice.say(`You made ${MQ.moneyWords(now)}! The castle gate is open. Hop to the top!`, 'en-US', { interrupt: true });
+      setPose('happy', 1.2);
+      say(`${MQ.money(now, targetFmt)}! Hop up ⬆`, `You made ${MQ.moneyWords(now)}! The castle gate is open. Hop to the top!`);
     } else {
       const left = coins.filter((c) => !c.taken).map((c) => c.v);
       if (!canMake(target - now, left)) {
-        say(`Hmm… the coins left can't make exactly ${MQ.money(target, targetFmt)}. ${PUT_BACK()} to put a coin back.`);
+        say('Can\'t make it · ↩ put back', `Hmm. The coins left can't make exactly ${W$(target)}. ${PUT_BACK_WORDS()}`);
       } else {
-        say(`You picked up a ${name}. Now you have ${MQ.money(now, pouchFmt)}.`);
+        say(`${cap(name)}! ${MQ.money(now, pouchFmt)}`, `A ${name}. Now you have ${W$(now)}.`);
       }
     }
+  }
+  const cap = (w) => w[0].toUpperCase() + w.slice(1);
+  // Picking up a coin: a little burst of blocks in the coin's colour and "+5¢" floating up.
+  // (Every coin gets the same show, so it never tells him he is done.)
+  function coinPop(coin) {
+    const { x, y } = cellCenter(coin.r, coin.c);
+    const k = COINS[coin.v];
+    blocks.burst(x, y, k.bill ? [k.fill, k.edge, '#ffffff'] : [k.hi, k.mid, k.lo, '#ffd23f'], 9, 0.55);
+    floaters.push({ x, y: y - 20, text: `+${coin.v >= 100 ? MQ.dollars(coin.v) : coin.v + '¢'}`, life: 1 });
   }
 
   // Level 3+: every coin goes in the pouch, even one that takes him over. The message and
@@ -607,23 +654,22 @@
     pouch.push(coin);
     if (before + coin.v > target) stats.overshoots++;
     MQ.Sound.coin(coin.v);
-    const { x, y } = cellCenter(coin.r, coin.c);
-    burst(x, y, coin.v >= 100 ? '#6fcf6f' : '#ffd23f', 14);
-    floaters.push({ x, y: y - 20, text: `+${coin.v >= 100 ? MQ.dollars(coin.v) : coin.v + '¢'}`, life: 1 });
+    coinPop(coin);
     const now = total();
     updateHud();
-    let text = `You picked up a ${COINS[coin.v].name}. Now you have ${MQ.money(now, pouchFmt)}.`;
+    const name = COINS[coin.v].name;
     // The dead-end hint is help he earns after 2 wrong tries at the gate.
     if (helpOn() && now < target && !canMake(target - now, coins.filter((c) => !c.taken).map((c) => c.v))) {
-      text += ` The coins left can't make ${MQ.money(target, targetFmt)} — ${PUT_BACK()} to put a coin back.`;
-      MQ.Voice.say('The coins left can\'t make it. Put a coin back.', 'en-US', { interrupt: true });
+      say('Can\'t make it · ↩ put back', 'The coins left can\'t make it. Put a coin back.');
+    } else {
+      // Only the coin's name is read out here (a short phrase the voice can reuse); the pouch shows the total.
+      say(`${cap(name)}! ${MQ.money(now, pouchFmt)}`, `A ${name}.`);
     }
-    say(text);
   }
 
   function putBack() {
     const coin = pouch.pop();
-    if (!coin) { say('Your pouch is empty.'); return; }
+    if (!coin) { say('Pouch is empty', 'Your pouch is empty.'); return; }
     stats.putBacks++;
     const from = cellCenter(player.r, player.c);
     coin.taken = false;
@@ -631,7 +677,7 @@
     coin.fly = { t: 0, x: from.x, y: from.y - 20 };
     MQ.Sound.putBack();
     updateHud();
-    say(`You put back a ${COINS[coin.v].name}. Now you have ${MQ.money(total(), pouchFmt)}.`);
+    say(`↩ ${cap(COINS[coin.v].name)} back · ${MQ.money(total(), pouchFmt)}`, `You put back a ${COINS[coin.v].name}.`);
   }
 
   function bonk() {
@@ -639,7 +685,9 @@
     MQ.Sound.bonk();
     const { x, y } = cellCenter(player.r, player.c);
     burst(x, y, '#ffffff', 10);
+    blocks.burst(x, y, ['#ffffff', '#ffd23f', '#ff5a5f'], 8, 0.5);
     floaters.push({ x, y: y - 10, text: 'Bonk!', life: 1, color: '#ff4d4d' });
+    setPose('oops', 0.9);
     player.r = player.fromR = START_ROW;
     player.c = player.fromC = START_COL;
     player.t = 1;
@@ -655,8 +703,9 @@
     }
     for (const c of coins) c.warned = false;
     updateHud();
-    const again = lost ? 'Bonk! The coins went back — start over from the bottom.' : 'Bonk! Back to the start.';
-    say(stats.bonks >= 3 ? `${MQ.CHEER.zh} (${MQ.CHEER.py}) Wait for a gap, then hop! ${again}` : again);
+    const again = lost ? 'Bonk! The coins went back. Start over from the bottom.' : 'Bonk! Back to the start.';
+    if (stats.bonks >= 3) say(`${MQ.CHEER.zh}! Wait for a gap 🚗`, `Wait for a gap, then hop! ${again}`);
+    else say(lost ? 'Bonk! Coins went back 🚗' : 'Bonk! Back to start 🚗', again);
   }
 
   // ---------- Win / results / adapting difficulty ----------
@@ -665,7 +714,9 @@
     if (cfg.judge) { gateUnlocked = true; MQ.Sound.open(); }
     MQ.Sound.win();
     const { x, y } = cellCenter(0, player.c);
-    for (let i = 0; i < 5; i++) setTimeout(() => burst(x + rand(-150, 150), y + rand(0, 200), pick(CAR_COLORS), 26), i * 150);
+    setPose('happy', 99);
+    blocks.burst(x, y - 10, ['#ffd23f', '#ff5a5f', '#48b0f7', '#4cd137'], 22, 1.1);
+    for (let i = 1; i < 5; i++) setTimeout(() => blocks.burst(W / 2 + rand(-260, 260), rand(30, 150), [pick(CAR_COLORS), '#ffd23f'], 12, 0.8), i * 160);
     const praise = MQ.pick(MQ.PRAISE);
     say(`${praise.zh} ${praise.en}`);
     if (data.settings.chinese) MQ.Voice.say(praise.zh, 'zh-CN', { interrupt: true });
@@ -716,9 +767,9 @@
       putBacks: stats.putBacks, seconds: Math.round(stats.seconds), date: new Date().toISOString(),
     });
     if (g.history.length > 200) g.history.splice(0, g.history.length - 200);
-    const heroesBefore = MQ.unlockedHeroes(data.stars).length;
+    const had = new Set(MQ.unlockedHeroes(data.stars).map((h) => h.id));
     data.stars += stars;
-    const newHero = MQ.unlockedHeroes(data.stars).slice(heroesBefore)[0];
+    const newHero = MQ.unlockedHeroes(data.stars).find((h) => !had.has(h.id));
     const move = adapt(stars);
     persist();
     updateHud();
@@ -737,13 +788,19 @@
           <span>🚗 ${stats.bonks} bonk${stats.bonks === 1 ? '' : 's'}</span>
         </div>
         <div class="next">${move.text}</div>
-        ${newHero ? `<div class="next">🎉 New hero: ${newHero.emoji} ${newHero.name}!</div>` : ''}
+        ${newHero ? `<div class="next new-hero">🎉 ${MQ.Art.img(newHero.id, 56)} ${MQ.escapeHtml(newHero.name)}!</div>` : ''}
         <div class="press keys-only">Press <span class="key">return</span> for a bonus question ⭐</div>
         <button class="btn go touch-only" data-go>Bonus question ⭐ ▶</button>
       </div>`,
-      (k) => { if (k === 'Enter' || k === ' ') startQuiz(); }
+      (k) => { if (k === 'Enter' || k === ' ') startQuiz(); },
+      true
     );
     onGo(startQuiz);
+    // The stars he just earned fly up to the ⭐ counter.
+    overlay.querySelectorAll('.stars-row span:not(.off)').forEach((s, i) => {
+      const r = s.getBoundingClientRect();
+      MQ.FX.flyStar(r.left + r.width / 2, r.top + r.height / 2, el('star-pill'), { delay: 250 + i * 180 });
+    });
     MQ.Voice.say(move.say, 'en-US');
     if (newHero) MQ.Voice.say(`New hero unlocked: ${newHero.name}! Pick it in the portal.`, 'en-US');
   }
@@ -887,6 +944,7 @@
     let done = false;
     let nudge = false;
 
+    let first = true;
     const render = (result) => {
       const choices = q.options.map((o, i) => {
         let cls = 'choice';
@@ -901,15 +959,16 @@
         ? `<div class="explain good">✔ Correct! <span class="zh">对了!</span> +1 ⭐</div>`
         : `<div class="explain bad">The answer is ${MQ.escapeHtml(q.answer)}. ${MQ.escapeHtml(q.explain)}</div>`;
       showOverlay(`
-        <div class="card">
-          <div class="hint">🐼 Bonus question · ${QUIZ[type].label}</div>
+        <div class="card quiz-card">
+          <div class="hint">⭐ Bonus · ${QUIZ[type].label}</div>
           ${q.visual ? `<div class="quiz-visual">${q.visual}</div>` : ''}
           <div class="quiz-q">${MQ.escapeHtml(q.q)}</div>
           <div class="choices${!result && sel < 0 ? ' waiting' : ''}">${choices}</div>
           ${feedback}
           <div class="press keys-only">${keyHint}</div>
           ${result ? '<button class="btn go touch-only" data-go>Next level ▶</button>' : '<div class="press touch-only">Tap your answer 👆</div>'}
-        </div>`, keys);
+        </div>`, keys, first);
+      first = false;
       overlay.querySelectorAll('.choice').forEach((b) => b.addEventListener('click', () => {
         if (done) { if (!MQ.isTouch) nextLevel(); return; } // on touch, the Next button moves on (no accidental double tap)
         sel = Number(b.dataset.i);
@@ -920,14 +979,20 @@
 
     const answer = () => {
       done = true;
+      quizOpen = false;
       const right = q.options[sel] === q.answer;
       const s = (g.quiz[type] = g.quiz[type] || { right: 0, tries: 0 });
       s.tries++;
       if (right) { s.right++; data.stars++; MQ.Sound.correct(); MQ.Voice.say(data.settings.chinese ? '对了!' : 'Correct!', data.settings.chinese ? 'zh-CN' : 'en-US', { interrupt: true }); }
       else { MQ.Sound.wrong(); MQ.Voice.say(`The answer is ${q.answer.replace('¢', ' cents')}`, 'en-US', { interrupt: true }); }
       persist();
-      updateHud();
       render(right ? 'right' : 'wrong');
+      if (right) {
+        const b = overlay.querySelector('.choice.right');
+        const r = b.getBoundingClientRect();
+        MQ.FX.flyStar(r.left + r.width / 2, r.top + r.height / 2, el('star-pill'));
+        setTimeout(updateHud, 800); // the counter ticks up when the star lands
+      } else updateHud();
     };
 
     const keys = (k) => {
@@ -942,6 +1007,7 @@
       }
     };
 
+    quizOpen = true;
     render();
     MQ.Voice.say(q.speak, 'en-US', { interrupt: true });
   }
@@ -953,10 +1019,11 @@
 
   // ---------- Overlays ----------
   let overlayKeys = null;
-  function showOverlay(html, keys) {
+  function showOverlay(html, keys, pop = false) {
     overlay.innerHTML = html;
     overlay.hidden = false;
     overlayKeys = keys;
+    if (pop) MQ.FX.popIn(overlay.querySelector('.card'));
   }
   function hideOverlay() {
     overlay.hidden = true;
@@ -994,7 +1061,7 @@
       : '';
     showOverlay(`
       <div class="card intro">
-        <h1>${hero} Level ${g.level}</h1>
+        <h1>${MQ.Art.img(heroId, 64, 'intro-hero')} Level ${g.level}</h1>
         <div class="goal-label">Collect exactly</div>
         <div class="goal">${MQ.money(target, targetFmt)}</div>
         ${zh}
@@ -1004,7 +1071,8 @@
         <div class="press keys-only">Press <span class="key">return</span> ▶</div>
         <button class="btn go touch-only" data-go>▶ Start</button>
       </div>`,
-      (k) => { if (k === 'Enter' || k === ' ') startPlay(); }
+      (k) => { if (k === 'Enter' || k === ' ') startPlay(); },
+      true
     );
     onGo(startPlay);
     MQ.Voice.say(`Level ${g.level}. Collect exactly ${MQ.moneyWords(target)}.`, 'en-US', { interrupt: true });
@@ -1014,7 +1082,7 @@
       MQ.Voice.say(touchUI() ? 'Wrong coin? Tap put back.' : 'Wrong coin? Press space to put it back.', 'en-US');
     }
     if (data.settings.chinese) MQ.Voice.say(MQ.zhMoney(target), 'zh-CN');
-    say(`Collect exactly ${MQ.money(target, targetFmt)}!`);
+    say(`Get ${MQ.money(target, targetFmt)}!`);
   }
 
   function startPlay() {
@@ -1023,30 +1091,32 @@
     state = 'play';
     boardQuietUntil = performance.now() + QUIET_MS;
     MQ.Sound.click();
-    say(`Collect exactly ${MQ.money(target, targetFmt)}, then hop into the castle!`);
+    say(`Get ${MQ.money(target, targetFmt)}, then 🏰`);
     if (cfg.judge) MQ.Voice.say(`Count your coins. Hop into the castle when you think you have exactly ${MQ.moneyWords(target)}.`, 'en-US', { interrupt: true });
     maybeShowTouchHint();
   }
 
+  // Pause: two big buttons. Esc again goes home (Esc, Esc = home); return plays on.
+  function goHome() { persist(); location.href = '../../index.html'; }
   function showPause() {
     state = 'pause';
-    let sel = 0;
-    const items = [['▶ Keep playing', resumePlay], ['🏠 Back to the portal', () => { persist(); location.href = '../../index.html'; }]];
-    const render = () => {
-      showOverlay(`
-        <div class="card">
-          <h2>⏸ Paused</h2>
-          <div class="menu">${items.map((it, i) => `<button class="btn ${i === 0 ? '' : 'secondary'} ${i === sel ? 'sel' : ''}" data-i="${i}">${it[0]}</button>`).join('')}</div>
-          <div class="press keys-only">Use <span class="key">↑</span> <span class="key">↓</span> and <span class="key">return</span></div>
-        </div>`,
-        (k) => {
-          if (k === 'ArrowUp' || k === 'ArrowDown') { sel = 1 - sel; render(); }
-          else if (k === 'Enter' || k === ' ') items[sel][1]();
-          else if (k === 'Escape') items[0][1]();
-        });
-      overlay.querySelectorAll('.menu .btn').forEach((b) => b.addEventListener('click', () => items[Number(b.dataset.i)][1]()));
-    };
-    render();
+    let sel = 0; // ▶ Play is the default (it is not a math answer)
+    const items = [['▶ Play', 'return', resumePlay], ['🏠 Home', 'esc', goHome]];
+    showOverlay(`
+      <div class="card pause-card">
+        <h2>⏸</h2>
+        <div class="menu">${items.map((it, i) => `<button class="btn big ${i === 0 ? '' : 'secondary'}" data-i="${i}">${it[0]}<span class="key keys-only">${it[1]}</span></button>`).join('')}</div>
+      </div>`,
+      (k, e) => {
+        if (e && e.repeat) return; // holding a key never jumps out of pause
+        if (k === 'ArrowUp' || k === 'ArrowDown' || k === 'ArrowLeft' || k === 'ArrowRight') { sel = 1 - sel; mark(); MQ.Sound.click(); }
+        else if (k === 'Enter' || k === ' ') items[sel][2]();
+        else if (k === 'Escape') goHome();
+      }, true);
+    const btns = overlay.querySelectorAll('.menu .btn');
+    const mark = () => btns.forEach((b, i) => b.classList.toggle('sel', i === sel));
+    mark();
+    btns.forEach((b) => b.addEventListener('click', () => items[Number(b.dataset.i)][2]()));
   }
 
   // ---------- Update loop ----------
@@ -1104,6 +1174,7 @@
 
     for (const p of particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += (p.dust ? 40 : 400) * dt; p.life -= dt; }
     particles = particles.filter((p) => p.life > 0);
+    blocks.update(dt);
     for (const f of floaters) { f.y -= 40 * dt; f.life -= dt; }
     floaters = floaters.filter((f) => f.life > 0);
   }
@@ -1142,10 +1213,10 @@
 
   function buildBackground() {
     bgCanvas = document.createElement('canvas');
-    bgCanvas.width = Math.max(1, Math.round(W * pixelScale));
+    bgCanvas.width = Math.max(1, Math.round(SW * pixelScale));
     bgCanvas.height = Math.max(1, Math.round(H * pixelScale));
     const b = bgCanvas.getContext('2d');
-    b.setTransform(pixelScale, 0, 0, pixelScale, 0, 0);
+    b.setTransform(pixelScale, 0, 0, pixelScale, MX * pixelScale, 0);
     const rnd = seeded(bgSeed);
     const isRoad = (r) => !!laneByRow[r];
 
@@ -1228,11 +1299,95 @@
         }
       }
     }
+    if (MX > 0) drawMargins(b, rnd, isRoad);
+    // The castle's walls, towers and keep never change during a level: paint them in here too.
+    ctx = b;
+    drawCastle('static');
+    ctx = screenCtx;
+  }
+
+  // Laptop only: scenery beside the playfield. A wooded hillside the hero can't enter; the roads
+  // run into tunnels in it, so cars come and go exactly as on the plain board.
+  function drawMargins(b, rnd, isRoad) {
+    const n = Math.ceil(MX / CELL);
+    const trees = [];
+    for (const side of [-1, 1]) {
+      const x0 = side < 0 ? -MX : W;
+      for (let r = 1; r < ROWS; r++) {
+        const y = rowTop(r);
+        for (let i = 0; i < n; i++) {
+          const c = side < 0 ? -1 - i : COLS + i;
+          b.fillStyle = (c + r) % 2 ? '#6fbf52' : '#77c75a';
+          b.fillRect(c * CELL, y, CELL, CELL);
+          const nearEdge = i === 0;
+          const roll = rnd();
+          const cx = c * CELL + CELL / 2 + (rnd() - 0.5) * 16;
+          const cy = y + CELL / 2 + (rnd() - 0.5) * 14;
+          if (!nearEdge && roll < 0.42) trees.push({ x: cx, y: cy + 20, s: 0.8 + rnd() * 0.35, tone: rnd() });
+          else if (roll < 0.6) trees.push({ x: cx, y: cy + 12, s: 0.45 + rnd() * 0.15, tone: rnd(), bush: true });
+          else if (roll < 0.7) {
+            const petal = ['#ffffff', '#ffd6e8', '#fff3a3', '#d9c8ff'][Math.floor(rnd() * 4)];
+            b.fillStyle = petal;
+            b.fillRect(cx - 3, cy - 3, 6, 6);
+            b.fillStyle = '#ffb703'; b.fillRect(cx - 1.5, cy - 1.5, 3, 3);
+          } else if (roll < 0.76) {
+            b.fillStyle = '#a7a39a'; b.fillRect(cx - 6, cy - 4, 12, 9);
+            b.fillStyle = '#c9c5bb'; b.fillRect(cx - 6, cy - 4, 12, 3);
+          }
+        }
+        if (isRoad(r)) {
+          // Tunnel: dark mouth on the road at the edge, a stone portal face beside it.
+          const edge = side < 0 ? 0 : W;
+          const dark = b.createLinearGradient(edge, 0, edge - side * 26, 0);
+          dark.addColorStop(0, 'rgba(10,12,16,0.55)'); dark.addColorStop(1, 'rgba(10,12,16,0)');
+          b.fillStyle = dark;
+          b.fillRect(side < 0 ? 0 : W - 26, y, 26, CELL);
+          const px = side < 0 ? -16 : W;
+          b.fillStyle = '#9d978b';
+          b.fillRect(px, y - 4, 16, CELL + 8);
+          b.fillStyle = '#b9b3a6';
+          b.fillRect(px, y - 4, 16, 4);
+          b.fillStyle = 'rgba(0,0,0,0.18)';
+          for (let k = 0; k < 5; k++) b.fillRect(px, y + 6 + k * 14, 16, 2);
+          b.fillRect(side < 0 ? px + 14 : px, y - 4, 2, CELL + 8);
+        }
+      }
+      // Soft shade over the hillside so the playfield reads as "where I can go".
+      b.fillStyle = 'rgba(20,60,20,0.10)';
+      b.fillRect(x0, CASTLE_H, MX, H - CASTLE_H);
+      const sh = b.createLinearGradient(side < 0 ? 0 : W, 0, side < 0 ? -18 : W + 18, 0);
+      sh.addColorStop(0, 'rgba(0,0,0,0.16)'); sh.addColorStop(1, 'rgba(0,0,0,0)');
+      b.fillStyle = sh;
+      b.fillRect(side < 0 ? -18 : W, CASTLE_H, 18, H - CASTLE_H);
+    }
+    trees.sort((a, c) => a.y - c.y);
+    for (const t of trees) blockTree(b, t);
+  }
+
+  // A Minecraft-style tree (or bush) seen from the front and a little above.
+  function blockTree(b, t) {
+    const s = t.s * CELL * 0.62;
+    const leaf = t.tone < 0.5 ? ['#4f9e3a', '#62b84a', '#3d812c'] : ['#3f8f3a', '#56a84c', '#2f7430'];
+    b.fillStyle = 'rgba(0,0,0,0.18)';
+    b.beginPath(); b.ellipse(t.x, t.y, s * 0.62, s * 0.18, 0, 0, Math.PI * 2); b.fill();
+    let top = t.y;
+    if (!t.bush) {
+      b.fillStyle = '#7a5230'; b.fillRect(t.x - s * 0.13, t.y - s * 0.55, s * 0.26, s * 0.55);
+      b.fillStyle = '#5e3e22'; b.fillRect(t.x + s * 0.03, t.y - s * 0.55, s * 0.1, s * 0.55);
+      top = t.y - s * 0.5;
+    }
+    const h = s * 0.8;
+    b.fillStyle = leaf[0]; b.fillRect(t.x - s / 2, top - h, s, h); // front face
+    b.fillStyle = leaf[1]; b.fillRect(t.x - s / 2, top - h - s * 0.3, s, s * 0.3); // top face
+    b.fillStyle = leaf[2]; b.fillRect(t.x + s * 0.3, top - h, s * 0.2, h); // shaded side
+    b.fillStyle = 'rgba(255,255,255,0.12)';
+    b.fillRect(t.x - s * 0.38, top - h * 0.8, s * 0.16, s * 0.16);
+    b.fillRect(t.x - s * 0.05, top - h * 0.45, s * 0.16, s * 0.16);
   }
 
   function drawRows() {
     if (!bgCanvas) buildBackground();
-    ctx.drawImage(bgCanvas, 0, 0, W, H);
+    ctx.drawImage(bgCanvas, -MX, 0, SW, H);
   }
 
   // Slow cloud shadows and a couple of butterflies keep the scene gently alive.
@@ -1241,14 +1396,15 @@
   let butterflies = [];
   function initAmbient() {
     const k = H / 736;
-    clouds = [0, 1, 2].map((i) => ({ x: i * (W / 2.6) + Math.random() * 100, y: (220 + i * 170) * k, s: (0.8 + Math.random() * 0.6) * Math.min(1, W / 832 + 0.2) }));
-    butterflies = [0, 1].map((i) => ({ x: Math.random() * W, y: (240 + Math.random() * 300) * k, phase: Math.random() * 6, dir: i ? 1 : -1 }));
+    const sw = W + 2 * Math.max(MX, 0);
+    clouds = [0, 1, 2].map((i) => ({ x: -MX + i * (sw / 2.6) + Math.random() * 100, y: (220 + i * 170) * k, s: (0.8 + Math.random() * 0.6) * Math.min(1, W / 832 + 0.2) }));
+    butterflies = [0, 1].map((i) => ({ x: -MX + Math.random() * sw, y: (240 + Math.random() * 300) * k, phase: Math.random() * 6, dir: i ? 1 : -1 }));
   }
 
   function drawAmbient(dt) {
     for (const cl of clouds) {
       cl.x += 8 * dt;
-      if (cl.x > W + 200) cl.x = -200;
+      if (cl.x > W + MX + 200) cl.x = -MX - 200;
       ctx.fillStyle = 'rgba(20,40,60,0.07)';
       ctx.beginPath();
       ctx.ellipse(cl.x, cl.y, 110 * cl.s, 34 * cl.s, 0, 0, Math.PI * 2);
@@ -1260,8 +1416,8 @@
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     for (const bf of butterflies) {
       bf.x += bf.dir * 18 * dt;
-      if (bf.x > W + 30) bf.x = -30;
-      if (bf.x < -30) bf.x = W + 30;
+      if (bf.x > W + MX + 30) bf.x = -MX - 30;
+      if (bf.x < -MX - 30) bf.x = W + MX + 30;
       const flap = 0.6 + 0.4 * Math.abs(Math.sin(time * 9 + bf.phase));
       ctx.save();
       ctx.translate(bf.x, bf.y + Math.sin(time * 1.3 + bf.phase) * 30);
@@ -1313,34 +1469,83 @@
 
   // The castle is designed 160 units tall. On shorter castle bands it is drawn scaled down
   // (s < 1) across a correspondingly wider design width CW; narrow boards get slimmer parts.
-  function drawCastle() {
+  // part: 'static' (walls, towers, keep: painted once into the cached background) or
+  // 'dynamic' (flags, gate, lock, signs: drawn every frame).
+  function drawCastle(part) {
     const s = CASTLE_H / 160;
     ctx.save();
     ctx.scale(s, s);
-    drawCastleParts(W / s, 160);
+    if (part === 'static' && MX > 0) {
+      ctx.save();
+      ctx.translate(-MX / s, 0);
+      castleBackdrop(SW / s, 160, MX / s, W / s);
+      ctx.restore();
+    }
+    drawCastleParts(W / s, 160, part, MX / s);
     ctx.restore();
   }
 
-  function drawCastleParts(W, CASTLE_H) {
-    const open = gateOpen();
-    // Level 3+: the right-hand sign stays the same until he hops in with the exact amount.
-    const gateTitle = cfg.judge && !open ? 'THE GATE' : null;
-    const gateWord = (short) => (open ? (short ? 'OPEN ⬆' : 'OPEN! ⬆') : cfg.judge ? 'CHECKS' : 'LOCKED');
+  // Laptop: the castle wall runs the whole width of the widened scene, with a small tower
+  // standing in each side margin.
+  function castleBackdrop(SW, CASTLE_H, mx, cw) {
+    const sky = ctx.createLinearGradient(0, 0, 0, CASTLE_H);
+    sky.addColorStop(0, '#a9ddff'); sky.addColorStop(1, '#dff3ff');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, SW, CASTLE_H);
+    bricks(0, 62, SW, CASTLE_H - 62, '#c96a4a', 'rgba(90,30,20,0.35)');
+    merlons(0, 48, SW, '#c96a4a');
+    if (mx < 150) return;
+    for (const tx of [mx / 2, SW - mx / 2]) {
+      const tw = 76;
+      bricks(tx - tw / 2, 52, tw, CASTLE_H - 52, '#b85c3e', 'rgba(90,30,20,0.35)');
+      merlons(tx - tw / 2, 38, tw + 8, '#b85c3e');
+      ctx.fillStyle = '#3b2a25';
+      roundRect(tx - 10, 78, 20, 28, 10); ctx.fill();
+      ctx.fillStyle = '#6b4a2b'; ctx.fillRect(tx - 2, 2, 4, 38);
+    }
+  }
+
+  // mx: the side margin (castle design units) on a laptop, else 0.
+  function drawCastleParts(W, CASTLE_H, part, mx) {
+    const still = part === 'static';
+    const wide = mx > 0;
     const brick = '#c96a4a';
     const mortar = 'rgba(90,30,20,0.35)';
     const slim = W < 800;
     const towerW = slim ? 84 : 100;
     const towerX = slim ? 48 : 70;
 
-    // Sky behind the castle
-    const sky = ctx.createLinearGradient(0, 0, 0, CASTLE_H);
-    sky.addColorStop(0, '#a9ddff'); sky.addColorStop(1, '#dff3ff');
-    ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, W, CASTLE_H);
+    if (still && !wide) {
+      // Sky behind the castle
+      const sky = ctx.createLinearGradient(0, 0, 0, CASTLE_H);
+      sky.addColorStop(0, '#a9ddff'); sky.addColorStop(1, '#dff3ff');
+      ctx.fillStyle = sky;
+      ctx.fillRect(0, 0, W, CASTLE_H);
 
-    // Long outer wall
-    bricks(0, 62, W, CASTLE_H - 62, brick, mortar);
-    merlons(0, 48, W, brick);
+      // Long outer wall
+      bricks(0, 62, W, CASTLE_H - 62, brick, mortar);
+      merlons(0, 48, W, brick);
+    }
+    const kw = slim ? 230 : 300;
+    const kx = W / 2 - kw / 2;
+    if (!still) {
+      // Flags on the keep, and on the side-margin towers on a laptop
+      const flags = [kx + 30, kx + kw - 30];
+      for (const fx of flags) {
+        ctx.fillStyle = fx < W / 2 ? '#ffcf33' : '#4aa8ff';
+        const wave = Math.sin(time * 4 + fx) * 3;
+        ctx.beginPath(); ctx.moveTo(fx + 2, -2); ctx.lineTo(fx + 26, 6 + wave); ctx.lineTo(fx + 2, 14); ctx.closePath(); ctx.fill();
+      }
+      if (mx >= 150) {
+        for (const fx of [-mx / 2, W + mx / 2]) {
+          ctx.fillStyle = fx < 0 ? '#ff7ac6' : '#2ec4a6';
+          const wave = Math.sin(time * 4 + fx) * 3;
+          ctx.beginPath(); ctx.moveTo(fx + 2, 4); ctx.lineTo(fx + 26, 12 + wave); ctx.lineTo(fx + 2, 20); ctx.closePath(); ctx.fill();
+        }
+      }
+      drawGateAndSigns(W, CASTLE_H, slim);
+      return;
+    }
 
     // Corner towers with pointy roofs and flags
     for (const tx of [towerX, W - towerX]) {
@@ -1352,17 +1557,21 @@
     }
 
     // Central keep
-    const kw = slim ? 230 : 300;
-    const kx = W / 2 - kw / 2;
     bricks(kx, 22, kw, CASTLE_H - 22, '#d7795a', mortar);
     merlons(kx, 8, kw, '#d7795a');
     for (const fx of [kx + 30, kx + kw - 30]) {
       ctx.fillStyle = '#6b4a2b'; ctx.fillRect(fx - 2, -4, 4, 30);
-      ctx.fillStyle = fx < W / 2 ? '#ffcf33' : '#4aa8ff';
-      const wave = Math.sin(time * 4 + fx) * 3;
-      ctx.beginPath(); ctx.moveTo(fx + 2, -2); ctx.lineTo(fx + 26, 6 + wave); ctx.lineTo(fx + 2, 14); ctx.closePath(); ctx.fill();
     }
+  }
 
+  function drawGateAndSigns(W, CASTLE_H, slim) {
+    const open = gateOpen();
+    // Level 3+: the right-hand sign stays the same until he hops in with the exact amount.
+    const gateTitle = cfg.judge && !open ? 'THE GATE' : null;
+    const gateWord = (short) => (open ? (short ? 'OPEN ⬆' : 'OPEN! ⬆') : cfg.judge ? 'CHECKS' : 'LOCKED');
+    const towerW = slim ? 84 : 100;
+    const towerX = slim ? 48 : 70;
+    const kw = slim ? 230 : 300;
     // Gate: an arch with a portcullis that rises when the amount is exactly right.
     const gw = slim ? 124 : 140;
     const gx = W / 2 - gw / 2;
@@ -1605,29 +1814,27 @@
     for (const lane of lanes) for (const car of lane.cars) drawCar(car, lane);
   }
 
+  // The block-animal hero, feet on the ground a little below the middle of his cell.
   function drawPlayer() {
     const e = ease(player.t);
     const x = lerp(player.fromC, player.c, e) * CELL + CELL / 2;
-    const yGround = lerp(rowMid(player.fromR), rowMid(player.r), e);
-    const hop = Math.sin(Math.PI * player.t) * 18;
-    ctx.fillStyle = 'rgba(0,0,0,0.22)';
-    ctx.beginPath(); ctx.ellipse(x, yGround + 22, 18 - hop * 0.3, 6, 0, 0, Math.PI * 2); ctx.fill();
-    if (player.inv > 0 && Math.floor(player.inv * 10) % 2 === 0) return;
-    // Squash on landing, stretch in the air
-    let sx = 1, sy = 1;
-    if (player.t < 1) { sx = 0.94; sy = 1.08; }
-    else if (player.land > 0) { const q = player.land / 0.16; sx = 1 + 0.14 * q; sy = 1 - 0.14 * q; }
-    // Idle breathing
-    const breathe = player.t >= 1 && player.land <= 0 ? 1 + Math.sin(time * 3) * 0.02 : 1;
-    ctx.save();
-    ctx.translate(x, yGround + 16 - hop);
-    ctx.scale(sx, sy * breathe);
-    ctx.font = `46px ${EMOJI_FONT}`;
-    ctx.fillStyle = '#000'; // color emoji inherit the fill's opacity
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'alphabetic';
-    ctx.fillText(hero, 0, -2);
-    ctx.restore();
+    const feet = lerp(rowMid(player.fromR), rowMid(player.r), e) + 24;
+    const name = time < pose.until ? pose.name : 'idle';
+    // Squash and stretch through the hop, then a little squash as he lands.
+    let { sx, sy, lift } = MQ.FX.hopShape(player.t < 1 ? player.t : 1);
+    lift *= 18;
+    if (player.t >= 1 && player.land > 0) { const q = player.land / 0.16; sx = 1 + 0.14 * q; sy = 1 - 0.14 * q; }
+    // 'oops': a small wobble that settles (no harsh shake).
+    let tilt = 0;
+    if (name === 'oops') {
+      const k = time - pose.from;
+      tilt = Math.sin(k * 26) * 0.13 * Math.max(0, 1 - k / 0.7);
+    }
+    // Just after a bonk he is safe for a moment: shown see-through and blinking softly.
+    const blink = player.inv > 0 && name !== 'oops' && Math.floor(player.inv * 10) % 2 === 0;
+    MQ.Art.drawHero(ctx, heroId, x, feet, HERO_SIZE, {
+      pose: name, t: time, sx, sy, lift, tilt, flip: player.face < 0, alpha: blink ? 0.35 : 1,
+    });
   }
 
   function drawEffects() {
@@ -1653,14 +1860,21 @@
   }
 
   function draw(dt) {
-    ctx.clearRect(0, 0, W, H);
-    drawRows();
-    drawCastle();
+    ctx.setTransform(pixelScale, 0, 0, pixelScale, MX * pixelScale, 0);
+    drawRows(); // opaque: covers the whole canvas
+    drawCastle('dynamic');
     drawCoins();
-    drawCars();
+    if (MX > 0) {
+      // Cars only show on the playfield; beside it they are inside the tunnels.
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, CASTLE_H, W, H - CASTLE_H); ctx.clip();
+      drawCars();
+      ctx.restore();
+    } else drawCars();
     drawPlayer();
     drawAmbient(dt);
     drawEffects();
+    blocks.draw(ctx);
     drawRipples(dt);
   }
 
@@ -1680,9 +1894,18 @@
 
   // ---------- Sizing (crisp on Retina screens) ----------
   let pixelScale = 1;
+  const MAX_MX = 8 * CELL; // widest scenery margin; beyond that the scene is centred
   function resize() {
     let availW, availH, minScale = 0.4;
-    if (layout === 'desk') {
+    MX = 0;
+    if (layout === 'wide') {
+      // Laptop: the stage fills everything under the top bar. The board keeps its shape; the
+      // scene gets wider (scenery margins) to use the rest of the width.
+      availW = wrap.clientWidth;
+      availH = wrap.clientHeight;
+      const k = Math.max(minScale, Math.min(availW / W, availH / H, 1.6));
+      MX = Math.max(0, Math.min(MAX_MX, Math.floor((availW / k - W) / 2)));
+    } else if (layout === 'desk') {
       const narrow = window.innerWidth <= 860;
       availW = narrow ? window.innerWidth - 24 : window.innerWidth - 300 - 20 - 36;
       availH = narrow ? window.innerHeight * 0.7 : window.innerHeight - 24;
@@ -1692,18 +1915,20 @@
       availH = wrap.clientHeight;
       minScale = 0.2;
     }
-    const scale = Math.max(minScale, Math.min(availW / W, availH / H, 1.5));
-    document.documentElement.style.setProperty('--board-w', `${Math.round(W * scale)}px`);
+    SW = W + 2 * MX;
+    const scale = Math.max(minScale, Math.min(availW / SW, availH / H, layout === 'wide' ? 1.6 : 1.5));
+    document.documentElement.style.setProperty('--board-w', `${Math.round(SW * scale)}px`);
     const dpr = window.devicePixelRatio || 1;
-    stage.style.width = `${Math.round(W * scale)}px`;
+    stage.style.width = `${Math.round(SW * scale)}px`;
     stage.style.height = `${Math.round(H * scale)}px`;
-    canvas.style.width = `${Math.round(W * scale)}px`;
+    canvas.style.width = `${Math.round(SW * scale)}px`;
     canvas.style.height = `${Math.round(H * scale)}px`;
-    canvas.width = Math.round(W * scale * dpr);
+    canvas.width = Math.round(SW * scale * dpr);
     canvas.height = Math.round(H * scale * dpr);
     pixelScale = scale * dpr;
-    ctx.setTransform(pixelScale, 0, 0, pixelScale, 0, 0);
+    ctx.setTransform(pixelScale, 0, 0, pixelScale, MX * pixelScale, 0);
     bgCanvas = null; // repaint the ground at the new size
+    if (layout === 'wide') fitPouch();
   }
 
   // Rotating the phone switches layout. Before play starts the board is rebuilt to the new
@@ -1744,6 +1969,19 @@
 
   // Small hook for automated tests.
   window.__coinCrossing = { quiz: QUIZ, get state() { return state; }, get target() { return target; }, get coins() { return coins; }, get player() { return player; }, total, get level() { return g.level; }, get layout() { return layout; }, get lanes() { return lanes; }, get grid() { return { cols: COLS, rows: ROWS, castle: CASTLE_H, w: W, h: H }; }, get stats() { return stats; }, get cfg() { return cfg; }, get pouch() { return pouch.map((c) => c.v); }, get gateLift() { return gateLift; }, startQuiz };
+
+  // Key reminders float up when he hasn't pressed anything for a while (keyboard players only).
+  // (MQ.Idle reads a list whose first item is an array as ONE pair, so each pair goes in as a Set.)
+  const keyGroup = (keys, word) => new Set([keys, word]);
+  MQ.Idle.attach(stage, {
+    delay: g.played < 2 ? 2500 : 4000,
+    active: () => !usedTouch && (state === 'play' || (state === 'quiz' && quizOpen)),
+    keys: () => {
+      if (state === 'quiz') return [keyGroup(['←', '→'], 'pick'), keyGroup(['return'], 'go')];
+      const hop = keyGroup(['←', '↑', '↓', '→'], 'hop');
+      return pouch.length ? [hop, keyGroup(['space'], 'put back')] : [hop];
+    },
+  });
 
   syncMusicBtn();
   resize();

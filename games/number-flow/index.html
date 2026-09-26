@@ -18,14 +18,15 @@
   <main class="layout" id="layout">
     <div class="stage" id="stage">
       <canvas id="board" aria-label="Number Flow puzzle board"></canvas>
+      <div class="idle-host" id="idle-host"></div>
       <div class="overlay" id="overlay" hidden></div>
     </div>
 
     <aside class="panel">
       <div class="panel-top">
         <a class="home" href="../../index.html" title="Back to the portal" aria-label="Back to the portal">🏠</a>
-        <div class="level-pill">Level <span id="level">1</span></div>
-        <div class="star-pill">⭐ <span id="stars">0</span></div>
+        <div class="level-pill"><span class="lv-word">Level</span><span class="lv-ic" aria-hidden="true">🧩</span> <span id="level">1</span></div>
+        <div class="star-pill" id="star-pill">⭐ <span id="stars">0</span></div>
       </div>
 
       <section class="box pairs-box">
@@ -41,16 +42,8 @@
       </section>
 
       <section class="bubble" id="bubble" aria-live="polite">
-        <span class="mascot">🐼</span>
-        <span id="message">Move to a dot and press space!</span>
-      </section>
-
-      <section class="controls keys-only">
-        <div><span class="key">←</span><span class="key">↑</span><span class="key">↓</span><span class="key">→</span> move / draw</div>
-        <div><span class="key">space</span> pick up a dot or path</div>
-        <div><span class="key">esc</span> stop drawing / pause</div>
-        <div><span class="key">H</span> hint 💡 <span class="dim">(fewer ⭐)</span></div>
-        <div><span class="key">R</span> start over &nbsp; <span class="key">M</span> music</div>
+        <span class="mascot" id="mascot"></span>
+        <span id="message"></span>
       </section>
 
       <nav class="touchbar" aria-label="Game buttons">
@@ -63,6 +56,7 @@
   </main>
 
   <script src="../../shared/core.js?v=11"></script>
+  <script src="../../shared/fx.js?v=11"></script>
   <script src="game.js?v=11"></script>
 </body>
 </html>

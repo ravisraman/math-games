@@ -5,10 +5,14 @@
   'use strict';
 
   const GAME_ID = 'numberFlow';
-  const W = 800; // logical board size (square); scaled to fit the window
+  // Logical scene size. Phones: an 800x800 square. Laptops: the canvas fills the window, 800 high
+  // and as wide as the window's shape (set in resize), with the board in the middle and the
+  // pairs / sum / hero in the side space.
+  let W = 800;
   const H = 800;
   const PAD = 26;
   const MAX_CELL = 172;
+  const MAX_CELL_WIDE = 210;
   const ZH_FONT = '"PingFang SC","Hiragino Sans GB","Noto Sans SC","Noto Sans CJK SC","Heiti SC",sans-serif';
   const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
   const STEP_TIME = 0.09; // seconds for a path segment to "grow" into the next cell
@@ -31,6 +35,8 @@
     data.games[GAME_ID] || {}
   ));
   function persist() { MQ.save(data); }
+  const heroId = MQ.heroId(data.player.hero);
+  MQ.Art.preload(heroId);
 
   // ---------- DOM ----------
   const canvas = document.getElementById('board');
@@ -323,6 +329,11 @@
   let lastSaveAt = 0;
   let geo = { cell: 100, x0: 0, y0: 0 };
   let compact = false; // phone layout (set in resize)
+  let wideGrid = 0; // laptop: logical size the board may fill (set in resize)
+  let railL = 0; // laptop: logical width of each side column
+  const blocks = MQ.FX.blocks();
+  // The hero (laptop: drawn in the right-hand column; phones: the little picture in the bubble).
+  const heroFx = { happyUntil: -1, oopsAt: -9, hopAt: -9 };
   // keyMode: show the keyboard cursor. Laptops start in it; phones switch to it only when keys are used.
   let keyMode = !MQ.isTouch;
   const kb = (keys, touch) => (keyMode ? keys : touch);
@@ -353,15 +364,18 @@
     computeGeo();
     cursor = puzzle.pairs[0].a;
     particles = []; floaters = []; lanterns = []; shimmers = [];
+    bgKey = '';
     grow = null; hintFlash = null; wrongFlash = null; ping = null;
+    if (!compact && W > H) resize(); // (the side columns depend on the board size)
     updateHud();
   }
 
   function computeGeo() {
     if (!puzzle) return;
     const n = puzzle.n;
-    const pad = compact ? 10 : PAD; // phones: the board uses (almost) the whole canvas
-    const cell = Math.min(MAX_CELL, (W - pad * 2) / n);
+    let cell;
+    if (!compact && wideGrid) cell = Math.min(MAX_CELL_WIDE, wideGrid / n); // laptop: as big as the window allows
+    else cell = Math.min(MAX_CELL, (W - (compact ? 10 : PAD) * 2) / n); // phones: (almost) the whole canvas
     geo = { cell, x0: (W - cell * n) / 2, y0: (H - cell * n) / 2 };
   }
 
@@ -402,11 +416,11 @@
     MQ.Sound.note(67, 'bell', { dur: 0.6, vel: 0.12 });
     const pr = puzzle.pairs[p];
     if (paths[p].length === 1) {
-      say(kb(`${pr.color.emoji} Make ${pr.target}! Walk with the arrows to the other ${pr.color.emoji} ${pr.target}.`, `${pr.color.emoji} Make ${pr.target}! Drag to the other ${pr.color.emoji} ${pr.target}.`));
+      say(`${pr.color.emoji} Make ${pr.target}!`);
       MQ.Voice.say(`Make ${pr.target}`, 'en-US', { interrupt: true });
       if (data.settings.chinese) MQ.Voice.say(MQ.zhNumber(pr.target), 'zh-CN');
     } else {
-      say(kb(`${pr.color.emoji} Keep going! Use the arrows. Step back to undo.`, `${pr.color.emoji} Keep going! Slide back to undo.`));
+      say(`${pr.color.emoji} Keep going!`);
     }
     updateHud();
   }
@@ -417,7 +431,7 @@
     drawing = -1;
     if (msg !== false) {
       const pr = puzzle.pairs[p];
-      if (!isCorrect(p)) say(msg || kb(`${pr.color.emoji} Paused. Press space on the path to keep going.`, `${pr.color.emoji} Touch the path to keep going.`));
+      if (!isCorrect(p)) say(msg || kb(`${pr.color.emoji} Space to go on`, `${pr.color.emoji} Touch to go on`));
     }
     updateHud();
   }
@@ -446,7 +460,7 @@
     }
     if (isComplete(p)) {
       MQ.Sound.nope();
-      say(`${pr.color.emoji} You reached the dot. To change the path, step back ↩ the way you came.`);
+      say('↩ Step back to change', 'You reached the dot. To change the path, step back the way you came.');
       return false;
     }
     const pos = P.indexOf(ni);
@@ -462,8 +476,8 @@
     if (occ >= 0 && occ !== p) {
       MQ.Sound.nope();
       const oc = puzzle.pairs[occ].color;
-      if (puzzle.cells[ni].pair === occ) say(`That's the ${oc.emoji} ${oc.name} dot. Paths can't go through other dots.`);
-      else say(`The ${oc.emoji} ${oc.name} path is in the way. Paths can't cross — try another way!`);
+      if (puzzle.cells[ni].pair === occ) say(`🚫 Not through ${oc.emoji}!`, `That's the ${oc.name} dot. Paths can't go through other dots.`);
+      else say(`🚫 ${oc.emoji} is in the way`, `The ${oc.name} path is in the way. Paths can't cross. Try another way!`);
       return false;
     }
     if (puzzle.cells[ni].pair === p && ni !== partnerOf(p, P[0])) return false; // (can't happen)
@@ -496,10 +510,10 @@
     const pr = puzzle.pairs[p];
     const s = sumOf(p);
     const t = terms(p);
-    if (!t.length) say(`${pr.color.emoji} Make ${pr.target}! Walk to the other ${pr.color.emoji} dot.`);
+    if (!t.length) say(`${pr.color.emoji} Make ${pr.target}!`);
     else if (!live()) {
       // He adds in his head: only the numbers, no total, no "too much", no 🎯. The dot grades it.
-      say(`${pr.color.emoji} ${t.join(' + ')} = ? Add them up! Make ${pr.target}, then go to the other ${pr.color.emoji}.`);
+      say(`🧠 Add them up!`);
       if (forward && !toldHead) {
         toldHead = true;
         MQ.Voice.say('Add them up in your head!', 'en-US');
@@ -507,12 +521,12 @@
     } else if (s > pr.target) {
       if (forward) MQ.Sound.note(50, 'harp', { delay: 0.12, dur: 0.6, vel: 0.1 });
       if (forward && s - t[t.length - 1] <= pr.target) MQ.Voice.say(`${s}. Too much!`, 'en-US', { interrupt: true });
-      say(`${t.join(' + ')} = ${s}. That's more than ${pr.target}! Step back ↩ and try another way.`);
+      say('Too much! ↩ Step back');
     } else if (s === pr.target) {
       if (forward) MQ.Voice.say(`${s}! Now go to the ${pr.color.name} dot.`, 'en-US', { interrupt: true });
-      say(`🎯 ${s}! Now walk to the other ${pr.color.emoji} dot.`);
+      say(`🎯 ${s}! Go to ${pr.color.emoji}`);
     }
-    else say(`${t.join(' + ')} = ${s}. You need ${pr.target - s} more.`);
+    else say(`${pr.color.emoji} Make ${pr.target}!`);
     updateHud();
   }
 
@@ -534,11 +548,13 @@
       MQ.Sound.open();
       shimmers.push({ p, t: 0 });
       paths[p].forEach((i, k) => setTimeout(() => { const c = cellCenter(i); burst(c.x, c.y, pr.color.light, 6); }, k * 60));
+      for (const i of [pr.a, pr.b]) { const c = cellCenter(i); blocks.burst(c.x, c.y, [pr.color.c, pr.color.light, pr.color.dark, '#ffe066'], 12, 0.8); }
+      heroCheer(1.8);
       const words = `${t.join(' plus ')} equals ${s}`;
       const done = puzzle.pairs.every((_, q) => isCorrect(q));
       if (!done) {
         const praise = MQ.pick(MQ.PRAISE);
-        say(`${t.join(' + ')} = ${s} ✅ ${praise.zh} ${pickNextTip()}`);
+        say(`✅ ${praise.zh}! ${pickNextTip()}`);
         MQ.Voice.say(words, 'en-US', { interrupt: true });
       } else {
         MQ.Voice.say(words, 'en-US', { interrupt: true });
@@ -550,11 +566,11 @@
     stats.wrongs++;
     MQ.Sound.nope();
     wrongFlash = { p, t: 0 };
+    heroOops();
     const diff = Math.abs(s - pr.target);
-    const eq = t.length ? `${t.join(' + ')} = ${s}` : 'That path has no numbers';
-    if (!t.length) say(`Oops! The path needs to go through some numbers to make ${pr.target}. Try a different way — go around! ↩`);
-    else if (s > pr.target) say(`Good try! ${eq}. Too much! The target is ${pr.target}. Try a different way — go around! ↩ Find a way with ${diff} less.`);
-    else say(`Good try! ${eq}. Not enough to make ${pr.target}. Try a different way — go around! ↩ Find a way with ${diff} more.`);
+    if (!t.length) say('Go through numbers ↩');
+    else if (s > pr.target) say(`Too much! ${diff} less ↩`);
+    else say(`Not enough! ${diff} more ↩`);
     const spoken = t.length ? `Good try! ${t.join(' plus ')} makes ${s}. ` : 'Good try! ';
     MQ.Voice.say(spoken + (s > pr.target ? `That's too much. We need ${pr.target}. Try a different way!` : `We need ${pr.target}. Try a different way!`), 'en-US', { interrupt: true });
     updateHud();
@@ -564,7 +580,7 @@
     const q = puzzle.pairs.findIndex((_, k) => !isCorrect(k));
     if (q < 0) return '';
     const pr = puzzle.pairs[q];
-    return `Now the ${pr.color.emoji} ${pr.target}!`;
+    return `Now ${pr.color.emoji} ${pr.target}`;
   }
 
   function track(key, label, right) {
@@ -599,7 +615,7 @@
     if (tooFar || (hintSeen[p].size >= hintCap(p) && !hintSeen[p].has(shown))) {
       // Half the route is shown already: the rest is his to find (and add).
       MQ.Sound.note(64, 'bell', { dur: 0.5, vel: 0.1 });
-      say(`💪 You can do the rest — add them up! ${pr.color.emoji} Make ${pr.target}.`);
+      say(`💪 You can do the rest!`);
       MQ.Voice.say(`You can do the rest. Add them up! Make ${pr.target}.`, 'en-US', { interrupt: true });
       updateHud();
       return;
@@ -607,7 +623,7 @@
     const wait = hintWait();
     if (wait > 0) {
       MQ.Sound.note(55, 'wood', { dur: 0.12, vel: 0.25 });
-      say(`🤔 Try it yourself first! Another hint in ${wait} second${wait === 1 ? '' : 's'}.`);
+      say(`🤔 Hint in ${wait} s`);
       MQ.Voice.say('Try it yourself first! Another hint soon.', 'en-US', { interrupt: true });
       return;
     }
@@ -631,7 +647,7 @@
     MQ.Sound.star();
     if (h === partnerOf(p, next[0])) { arrive(p); return; }
     const num = puzzle.cells[h].num;
-    say(`💡 Try going through the ${num} next! ${moved ? '(I moved another path out of the way.) ' : ''}${kb('Keep going with the arrows.', 'Drag on from the end of the path.')}`);
+    say(`💡 Try the ${num}!`);
     MQ.Voice.say(`Try the ${num} next!`, 'en-US', { interrupt: true });
     updateHud();
   }
@@ -682,28 +698,55 @@
     sent.classList.toggle('long', t.length > 3 || s >= 100);
     if (!t.length) {
       sent.innerHTML = `${dotHtml(pr, true)} <span class="eq">make</span> ${pr.target}`;
-      need.textContent = paths[p].length ? 'Walk to a number ➜' : kb('Press space on a dot to start', '👆 Drag from a dot to start');
+      need.textContent = paths[p].length ? 'Walk to a number ➜' : kb('Space on a dot ▶', '👆 Drag from a dot');
     } else if (!reveal) {
       sent.innerHTML = `${t.join(' + ')} <span class="eq">=</span> <span class="total">?</span>`;
       need.textContent = `Add them up! Make ${pr.target}.`;
     } else {
       sent.innerHTML = `${t.join(' + ')} <span class="eq">=</span> <span class="total">${s}</span>`;
       if (isCorrect(p)) { need.textContent = `✅ Exactly ${pr.target}!`; need.classList.add('done'); }
-      else if (s === pr.target) { need.textContent = `🎯 ${pr.target}! Now go to the other dot`; need.classList.add('done'); }
-      else if (s > pr.target) { need.textContent = `Too much! ${s - pr.target} over ${pr.target} ↩`; need.classList.add('over'); }
-      else need.textContent = `Need ${pr.target - s} more to make ${pr.target}`;
+      else if (s === pr.target) { need.textContent = '🎯 Now go to the dot'; need.classList.add('done'); }
+      else if (s > pr.target) { need.textContent = `Too much! ${s - pr.target} over ↩`; need.classList.add('over'); }
+      else need.textContent = `Need ${pr.target - s} more`;
     }
     el('sentence-zh').hidden = !data.settings.chinese;
     el('sentence-zh').textContent = t.length && data.settings.chinese ? `${t.map((v) => MQ.zhNumber(v)).join(' 加 ')} 等于 ${reveal ? MQ.zhNumber(s) : '几？'}` : '';
   }
 
-  function say(text, { speak = false } = {}) {
-    el('message').textContent = text;
-    const b = el('bubble');
-    b.classList.remove('pop');
-    void b.offsetWidth;
-    b.classList.add('pop');
-    if (speak) MQ.Voice.say(text.replace(/\p{Extended_Pictographic}/gu, ''), 'en-US', { interrupt: true });
+  // The bubble shows a short caption (a few big words); `spoken` is the full sentence, read out
+  // (the same sentence isn't repeated within a few seconds, so dragging along a wall stays quiet).
+  let lastSpoken = '', lastSpokenAt = -9;
+  function say(text, spoken) {
+    const m = el('message');
+    if (m.textContent !== text) {
+      m.textContent = text;
+      const b = el('bubble');
+      b.classList.remove('pop');
+      void b.offsetWidth;
+      b.classList.add('pop');
+    }
+    if (spoken && !(spoken === lastSpoken && time - lastSpokenAt < 4)) {
+      lastSpoken = spoken; lastSpokenAt = time;
+      MQ.Voice.say(spoken, 'en-US', { interrupt: true });
+    }
+  }
+
+  // The hero cheers (hops, 'happy') on a right path and says "oops" (with a little wobble) on a wrong one.
+  function heroCheer(sec) {
+    heroFx.happyUntil = time + sec;
+    heroFx.hopAt = time;
+    mascotAnim('cheer');
+  }
+  function heroOops() {
+    heroFx.oopsAt = time;
+    heroFx.happyUntil = -1;
+    mascotAnim('oops');
+  }
+  function mascotAnim(cls) {
+    const m = el('mascot');
+    m.classList.remove('cheer', 'oops');
+    void m.offsetWidth;
+    m.classList.add(cls);
   }
 
   // ---------- Input ----------
@@ -721,10 +764,8 @@
         if (drawing >= 0) step(...DIRS[k]);
         else moveCursor(...DIRS[k]);
       } else if ((k === ' ' || k === 'Enter') && !e.repeat) pressCell(cursor);
-      else if (k === 'Escape') {
-        if (drawing >= 0) cancelDrawing();
-        else showPause();
-      } else if ((k === 'h' || k === 'H') && !e.repeat) hint();
+      else if (k === 'Escape' && !e.repeat) showPause(); // (a path being drawn is kept)
+      else if ((k === 'h' || k === 'H') && !e.repeat) hint();
       else if ((k === 'r' || k === 'R') && !e.repeat) confirmReset();
       else if (k === 'p' || k === 'P') showPause();
       return;
@@ -756,10 +797,10 @@
     const cp = puzzle.cells[cursor].pair;
     if (cp >= 0) {
       const pr = puzzle.pairs[cp];
-      say(isCorrect(cp) ? `${pr.color.emoji} ${pr.target} is done ✅` : `${pr.color.emoji} ${pr.target}! Press space to start drawing.`);
+      say(isCorrect(cp) ? `${pr.color.emoji} ${pr.target} ✅` : `${pr.color.emoji} ${pr.target}! Press space`);
     } else {
       const q = occupant(cursor);
-      if (q >= 0 && !isCorrect(q)) say(`Press space to pick up the ${puzzle.pairs[q].color.emoji} path here.`);
+      if (q >= 0 && !isCorrect(q)) say(`Space: pick up ${puzzle.pairs[q].color.emoji}`);
     }
   }
 
@@ -788,7 +829,7 @@
         cursor = j;
         const pr = puzzle.pairs[puzzle.cells[j].pair];
         MQ.Sound.note(72, 'bell', { dur: 0.5, vel: 0.1 });
-        say(`✅ That one is done! Here is the ${pr.color.emoji} ${pr.target}. Press space to start it.`);
+        say(`✅ Done! Now ${pr.color.emoji} ${pr.target}`, `That one is done! Here is the ${pr.color.name} ${pr.target}.`);
       }
       return;
     }
@@ -800,16 +841,7 @@
     cursor = j;
     MQ.Sound.note(72, 'bell', { dur: 0.5, vel: 0.1 });
     const pr = puzzle.pairs[puzzle.cells[j].pair];
-    say(`Paths start on a dot. Here is the ${pr.color.emoji} ${pr.target}! Press space again to start.`);
-  }
-
-  function cancelDrawing() {
-    const p = drawing;
-    paths[p] = [];
-    drawing = -1;
-    MQ.Sound.putBack();
-    say(`${puzzle.pairs[p].color.emoji} Path cleared. Press space on a dot to try again.`);
-    updateHud();
+    say(`Start on a dot! ${pr.color.emoji}`, `Paths start on a dot. Here is the ${pr.color.name} ${pr.target}!`);
   }
 
   // Mouse / finger: press on a dot or path and drag through the cells, like Flow Free.
@@ -880,7 +912,7 @@
       if (j >= 0) {
         const pr = puzzle.pairs[puzzle.cells[j].pair];
         ping = { i: j, t: 0 };
-        say(`Paths start on a dot 👆 Put your finger on the ${pr.color.emoji} ${pr.target} and drag!`);
+        say(`👆 Drag from ${pr.color.emoji} ${pr.target}!`, `Paths start on a dot. Put your finger on the ${pr.color.name} ${pr.target} and drag!`);
       }
       updateHud();
     } else {
@@ -946,7 +978,7 @@
       doneGrab = null;
       if (ev && ev.type === 'pointerup' && state === 'play') {
         MQ.Sound.note(72, 'bell', { dur: 0.5, vel: 0.1 });
-        say('That one is done! ✅', { speak: true });
+        say('✅ Done!', 'That one is done!');
       }
     }
     if (!pointerDrawing) return;
@@ -979,14 +1011,15 @@
     state = 'won';
     drawing = -1;
     setTimeout(() => MQ.Sound.win(), 500);
+    heroCheer(9);
     for (let i = 0; i < 6; i++) {
-      setTimeout(() => burst(rand(120, W - 120), rand(120, H - 200), pick(COLORS).c, 26), 300 + i * 160);
+      setTimeout(() => blocks.burst(rand(geo.x0 + 60, W - geo.x0 - 60), rand(160, H - 200), [pick(COLORS).c, pick(COLORS).c, '#ffe066', '#ffffff'], 18, 1), 300 + i * 160);
     }
     for (let i = 0; i < 9; i++) {
       lanterns.push({ x: rand(60, W - 60), y: H + rand(20, 260), vy: 70 + Math.random() * 50, sway: Math.random() * 6, emoji: pick(['🏮', '🏮', '🏮', '⭐', '🎈']) });
     }
     const praise = MQ.pick(MQ.PRAISE);
-    say(`${praise.zh} ${praise.en} Every path adds up!`);
+    say(`🎉 ${praise.zh}!`);
     setTimeout(() => {
       if (data.settings.chinese) MQ.Voice.say(praise.zh, 'zh-CN');
       else MQ.Voice.say(praise.en, 'en-US');
@@ -1051,7 +1084,8 @@
     const moveShort = { up: '⬆️ Level up!', down: '🌱 Easier one next', same: '🔁 Go for ⭐⭐⭐!' }[move.kind];
     setTimeout(() => MQ.Voice.say(move.text, 'en-US'), 400);
     showOverlay(`
-      <div class="card">
+      <div class="card result">
+        <canvas class="card-hero" width="240" height="240" data-pose="happy" aria-hidden="true"></canvas>
         <h2>Solved! 🎉</h2>
         <div class="stars-row">${starHtml}</div>
         <div class="praise"><span class="zh">${praise.zh}</span><small>${praise.py} · ${praise.en}</small></div>
@@ -1062,13 +1096,24 @@
           <span>🔄 ${stats.resets}</span>
         </div>
         <div class="next">${moveShort}</div>
-        ${newHero ? `<div class="next">🎉 New hero: ${newHero.emoji} ${newHero.name}!</div>` : ''}
+        ${newHero ? `<div class="next new-hero">🎉 New: ${MQ.Art.img(newHero.id, 52)} ${MQ.escapeHtml(newHero.name)}!</div>` : ''}
         <div class="press keys-only">Press <span class="key">return</span> ▶</div>
         <button class="btn go touch-only" type="button">Next ▶</button>
       </div>`,
       (k) => { if (k === 'Enter' || k === ' ') nextPuzzle(); }
     );
     overlay.querySelector('.card').addEventListener('click', armed(nextPuzzle));
+    // Each star he earned flies from the card to the ⭐ counter, which counts up as they land.
+    const counter = el('stars');
+    const spans = overlay.querySelectorAll('.stars-row span:not(.off)');
+    counter.textContent = data.stars - stars;
+    spans.forEach((sp, i) => {
+      const r = sp.getBoundingClientRect();
+      const delay = 450 + i * 260;
+      MQ.FX.flyStar(r.left + r.width / 2, r.top + r.height / 2, el('star-pill'), { delay });
+      setTimeout(() => { counter.textContent = data.stars - stars + i + 1; }, delay + 800);
+    });
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) counter.textContent = data.stars;
   }
 
   function nextPuzzle() {
@@ -1082,16 +1127,26 @@
   let overlayAt = 0;
   // Taps on a card only count after it has been up a moment (no accidental double actions).
   const armed = (fn) => () => { if (performance.now() - overlayAt > 450) fn(); };
+  let cardHero = null; // a little canvas on the card where the hero is animated
   function showOverlay(html, keys) {
     overlayAt = performance.now();
     overlay.innerHTML = html;
     overlay.hidden = false;
     overlayKeys = keys;
+    cardHero = overlay.querySelector('canvas.card-hero');
+    MQ.FX.popIn(overlay.querySelector('.card'));
   }
   function hideOverlay() {
     overlay.hidden = true;
     overlay.innerHTML = '';
     overlayKeys = null;
+    cardHero = null;
+  }
+  function drawCardHero() {
+    if (!cardHero) return;
+    const c = cardHero.getContext('2d');
+    c.clearRect(0, 0, 240, 240);
+    MQ.Art.drawHero(c, heroId, 120, 232, 224, { pose: cardHero.dataset.pose || 'idle', t: time });
   }
 
   // Tiny picture for the intro card: a 3×2 board, 7 ⋯ 7 on top with a 5 between them and
@@ -1125,7 +1180,7 @@
       : '<div class="row">↪️ Go around, add up!</div>';
     showOverlay(`
       <div class="card intro">
-        <h1>🧩 Level ${g.level}</h1>
+        <h1>${MQ.Art.img(heroId, 64)} Level ${g.level}</h1>
         <div class="goal">🎯 Make</div>
         <div class="targets">${targets}</div>
         ${demo}
@@ -1143,7 +1198,7 @@
     const how = first ? kb(' Press space on a dot, then walk to its twin. Step back to undo. Stuck? Press H for a hint.', ' Put your finger on a dot and drag to its twin. Slide back to undo. Stuck? Tap Hint.') : '';
     MQ.Voice.say(`Level ${g.level}.${rules} Make ${spoken}.${head}${how}`, 'en-US', { interrupt: true });
     if (data.settings.chinese) MQ.Voice.say(list.map((v) => MQ.zhNumber(v)).join(','), 'zh-CN');
-    say('Connect each pair of dots. Add up the numbers on the way!');
+    say('Connect the dots!');
   }
 
   function startPlay() {
@@ -1154,7 +1209,7 @@
     const pr = puzzle.pairs[0];
     cursor = pr.a;
     active = 0;
-    say(kb(`The box is on the ${pr.color.emoji} ${pr.target}. Press space to start drawing!`, `👆 Put your finger on the ${pr.color.emoji} ${pr.target} and drag to the other ${pr.color.emoji} ${pr.target}!`));
+    say(kb(`${pr.color.emoji} ${pr.target}! Press space`, `👆 Drag from ${pr.color.emoji} ${pr.target}!`));
     updateHud();
     if (!live() && !toldHead) { toldHead = true; MQ.Voice.say('Add them up in your head! The total shows at the other dot.', 'en-US'); }
   }
@@ -1164,27 +1219,29 @@
     drawing = -1;
     pointerDrawing = false;
     fingerPt = null;
+    // Two big buttons with their keys: return = play on, esc = home (so esc, esc always gets home).
     let sel = 0;
-    const items = [['▶ Keep playing', () => { hideOverlay(); state = 'play'; }], ['🏠 Back to the portal', () => { persist(); location.href = '../../index.html'; }]];
-    const render = () => {
-      showOverlay(`
-        <div class="card">
-          <h2>⏸ Paused</h2>
-          <div class="menu">${items.map((it, i) => `<button class="btn ${i === 0 ? '' : 'secondary'} ${i === sel ? 'sel' : ''}" data-i="${i}">${it[0]}</button>`).join('')}</div>
-          <div class="press keys-only">Use <span class="key">↑</span> <span class="key">↓</span> and <span class="key">return</span></div>
-        </div>`,
-        (k) => {
-          if (k === 'ArrowUp' || k === 'ArrowDown') { sel = 1 - sel; MQ.Sound.click(); render(); }
-          else if (k === 'Enter' || k === ' ') items[sel][1]();
-          else if (k === 'Escape') items[0][1]();
-        });
-      overlay.querySelectorAll('.menu .btn').forEach((b) => b.addEventListener('click', armed(() => items[Number(b.dataset.i)][1]())));
-    };
-    render();
+    const resume = () => { hideOverlay(); state = 'play'; };
+    const home = () => { persist(); location.href = '../../index.html'; };
+    const items = [['▶ Play', 'return', resume], ['🏠 Home', 'esc', home]];
+    showOverlay(`
+      <div class="card pause">
+        <h2>⏸️</h2>
+        <div class="menu">${items.map((it, i) => `<button class="btn big ${i === 0 ? '' : 'secondary'} ${i === sel ? 'sel' : ''}" data-i="${i}" type="button">${it[0]} <span class="key keys-only">${it[1]}</span></button>`).join('')}</div>
+      </div>`,
+      (k) => {
+        if (k === 'ArrowUp' || k === 'ArrowDown' || k === 'ArrowLeft' || k === 'ArrowRight') {
+          sel = 1 - sel;
+          MQ.Sound.click();
+          overlay.querySelectorAll('.menu .btn').forEach((b, i) => b.classList.toggle('sel', i === sel));
+        } else if (k === 'Enter' || k === ' ') items[sel][2]();
+        else if (k === 'Escape') home();
+      });
+    overlay.querySelectorAll('.menu .btn').forEach((b) => b.addEventListener('click', armed(() => items[Number(b.dataset.i)][2]())));
   }
 
   function confirmReset() {
-    if (paths.every((P) => P.length === 0)) { say(kb('The board is already empty. Press space on a dot to start!', 'The board is already empty. Drag from a dot to start!')); return; }
+    if (paths.every((P) => P.length === 0)) { say('Already empty!'); return; }
     state = 'confirm';
     drawing = -1;
     pointerDrawing = false;
@@ -1197,7 +1254,7 @@
       stats.resets++;
       active = 0;
       MQ.Sound.putBack();
-      say(kb('Fresh start! Press space on a dot.', 'Fresh start! Drag from a dot.'));
+      say('Fresh start!');
       updateHud();
     };
     showOverlay(`
@@ -1249,71 +1306,123 @@
     floaters = floaters.filter((f) => f.life > 0);
     for (const l of lanterns) l.y -= l.vy * dt;
     lanterns = lanterns.filter((l) => l.y > -80);
+    blocks.update(dt);
   }
 
   // ---------- Drawing ----------
-  function roundRect(x, y, w, h, r) {
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r);
-    ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r);
-    ctx.arcTo(x, y, x + w, y, r);
-    ctx.closePath();
+  function roundRectOn(c, x, y, w, h, r) {
+    c.beginPath();
+    c.moveTo(x + r, y);
+    c.arcTo(x + w, y, x + w, y + h, r);
+    c.arcTo(x + w, y + h, x, y + h, r);
+    c.arcTo(x, y + h, x, y, r);
+    c.arcTo(x, y, x + w, y, r);
+    c.closePath();
   }
+  const roundRect = (x, y, w, h, r) => roundRectOn(ctx, x, y, w, h, r);
 
+  // The sky, the board tray and the empty tiles only change on resize / a new puzzle, so they
+  // are drawn once into an offscreen canvas (at full pixel resolution) and copied each frame.
+  let bgCache = null, bgKey = '';
   function drawBackground() {
-    const bg = ctx.createLinearGradient(0, 0, 0, H);
-    bg.addColorStop(0, '#2e2a5c');
-    bg.addColorStop(1, '#3d2f5e');
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, W, H);
-    // A few soft "stars" in the dusk sky around the board.
-    ctx.fillStyle = 'rgba(255,255,255,0.35)';
-    for (let k = 0; k < 26; k++) {
+    const key = `${canvas.width}x${canvas.height}|${W}|${puzzle.n}|${geo.cell}|${geo.x0}`;
+    if (key !== bgKey || !bgCache) {
+      bgKey = key;
+      bgCache = bgCache || document.createElement('canvas');
+      bgCache.width = canvas.width;
+      bgCache.height = canvas.height;
+      const b = bgCache.getContext('2d');
+      b.setTransform(pixelScale, 0, 0, pixelScale, 0, 0);
+      paintStatic(b);
+    }
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(bgCache, 0, 0);
+    ctx.restore();
+    // A few soft twinkling "stars" in the dusk sky around the board.
+    ctx.fillStyle = '#ffffff';
+    const count = Math.round(26 * W / 800);
+    for (let k = 0; k < count; k++) {
       const x = (k * 137.5) % W;
       const y = (k * 71.3 + 13) % H;
       const tw = 0.5 + 0.5 * Math.sin(time * 1.3 + k);
-      ctx.globalAlpha = 0.15 + 0.25 * tw;
-      ctx.beginPath(); ctx.arc(x, y, 1.6, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 0.05 + 0.1 * tw;
+      ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
     }
     ctx.globalAlpha = 1;
-    // Board tray
-    const { x0, y0, cell } = geo;
-    const size = cell * puzzle.n;
-    const tp = Math.min(12, x0 - 3);
-    roundRect(x0 - tp, y0 - tp, size + tp * 2, size + tp * 2, 26);
-    ctx.fillStyle = 'rgba(15,12,40,0.45)';
-    ctx.fill();
   }
 
+  function paintStatic(b) {
+    const bg = b.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, '#2e2a5c');
+    bg.addColorStop(1, '#3d2f5e');
+    b.fillStyle = bg;
+    b.fillRect(0, 0, W, H);
+    if (!compact && W > H) {
+      // Laptop: a soft glow behind the board, and gentle block hills along the bottom of the side columns.
+      const { x0, cell } = geo;
+      const glow = b.createRadialGradient(W / 2, H / 2, cell, W / 2, H / 2, W * 0.6);
+      glow.addColorStop(0, 'rgba(120,100,220,0.28)');
+      glow.addColorStop(1, 'rgba(120,100,220,0)');
+      b.fillStyle = glow;
+      b.fillRect(0, 0, W, H);
+      const bs = 34;
+      for (const side of [0, 1]) {
+        const left = side ? W - x0 + 8 : 0, right = side ? W : x0 - 8;
+        for (let x = left, k = 0; x < right; x += bs, k++) {
+          const h = 1 + ((k * 7 + side * 3) % 4 === 0 ? 1 : 0) + ((k * 5 + side) % 7 === 0 ? 1 : 0);
+          for (let j = 0; j < h; j++) {
+            const y = H - (j + 1) * bs;
+            const w = Math.min(bs, right - x);
+            b.fillStyle = j === h - 1 ? '#4b3f86' : '#3f3574';
+            b.fillRect(x, y, w - 2, bs - 2);
+            b.fillStyle = 'rgba(255,255,255,0.07)';
+            b.fillRect(x, y, w - 2, 5);
+          }
+        }
+      }
+    }
+    // Board tray
+    const { x0, y0, cell } = geo;
+    const n = puzzle.n;
+    const size = cell * n;
+    const tp = Math.min(12, x0 - 3, y0 - 1);
+    roundRectOn(b, x0 - tp, y0 - tp, size + tp * 2, size + tp * 2, 26);
+    b.fillStyle = 'rgba(15,12,40,0.45)';
+    b.fill();
+    // Empty tiles
+    const gap = Math.max(4, cell * 0.06);
+    for (let i = 0; i < n * n; i++) {
+      const r = Math.floor(i / n), c = i % n;
+      const x = x0 + c * cell + gap / 2, y = y0 + r * cell + gap / 2, s = cell - gap;
+      roundRectOn(b, x, y, s, s, cell * 0.16);
+      const tile = b.createLinearGradient(0, y, 0, y + s);
+      tile.addColorStop(0, '#474173');
+      tile.addColorStop(1, '#3a3462');
+      b.fillStyle = tile;
+      b.fill();
+      b.strokeStyle = 'rgba(255,255,255,0.07)';
+      b.lineWidth = 2;
+      b.stroke();
+    }
+  }
+
+  // Path tiles get a tint of their color (finished ones glow gently).
   function drawTiles() {
     const { x0, y0, cell } = geo;
     const n = puzzle.n;
     const gap = Math.max(4, cell * 0.06);
-    const owner = new Int8Array(n * n).fill(-1);
-    paths.forEach((P, p) => P.forEach((i) => { owner[i] = p; }));
-    for (let i = 0; i < n * n; i++) {
-      const r = Math.floor(i / n), c = i % n;
-      const x = x0 + c * cell + gap / 2, y = y0 + r * cell + gap / 2, s = cell - gap;
-      roundRect(x, y, s, s, cell * 0.16);
-      const tile = ctx.createLinearGradient(0, y, 0, y + s);
-      tile.addColorStop(0, '#474173');
-      tile.addColorStop(1, '#3a3462');
-      ctx.fillStyle = tile;
-      ctx.fill();
-      const p = owner[i];
-      if (p >= 0) {
-        ctx.fillStyle = puzzle.pairs[p].color.c;
-        ctx.globalAlpha = isCorrect(p) ? 0.3 + 0.06 * Math.sin(time * 3) : 0.2;
+    paths.forEach((P, p) => {
+      if (!P.length) return;
+      ctx.fillStyle = puzzle.pairs[p].color.c;
+      ctx.globalAlpha = isCorrect(p) ? 0.3 + 0.06 * Math.sin(time * 3) : 0.2;
+      for (const i of P) {
+        const r = Math.floor(i / n), c = i % n;
+        roundRect(x0 + c * cell + gap / 2, y0 + r * cell + gap / 2, cell - gap, cell - gap, cell * 0.16);
         ctx.fill();
-        ctx.globalAlpha = 1;
       }
-      // top highlight
-      ctx.strokeStyle = 'rgba(255,255,255,0.07)';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
+    });
+    ctx.globalAlpha = 1;
   }
 
   // Points of path p (with the newest segment partly grown).
@@ -1664,8 +1773,29 @@
     for (const l of lanterns) ctx.fillText(l.emoji, l.x + Math.sin(time * 2 + l.sway) * 14, l.y);
   }
 
+  // Laptop: the hero stands at the bottom of the right-hand column (the caption bubble sits above it).
+  function heroSize() { return Math.min(200, railL * 0.6); }
+  function drawHero() {
+    if (compact || railL < 120) return;
+    const size = heroSize();
+    const x = W - railL / 2, y = H - 18;
+    let pose = 'idle', tilt = 0, sx = 1, sy = 1, lift = 0;
+    const oops = time - heroFx.oopsAt;
+    if (oops < 0.9) {
+      pose = 'oops';
+      tilt = Math.sin(oops * 16) * 0.07 * (1 - oops / 0.9); // a small wobble, no shake
+    } else if (time < heroFx.happyUntil || state === 'won' || state === 'result') {
+      pose = 'happy';
+      const hp = (time - heroFx.hopAt) / 0.55;
+      if (hp < 2) { // two little hops
+        const h = MQ.FX.hopShape(hp % 1);
+        sx = h.sx; sy = h.sy; lift = h.lift * size * 0.18;
+      }
+    }
+    MQ.Art.drawHero(ctx, heroId, x, y, size, { pose, t: time, tilt, sx, sy, lift });
+  }
+
   function draw() {
-    ctx.clearRect(0, 0, W, H);
     drawBackground();
     drawTiles();
     drawPaths();
@@ -1675,6 +1805,8 @@
     drawHintFlash();
     drawPing();
     drawEffects();
+    blocks.draw(ctx);
+    drawHero();
     drawTouchHand();
     drawHeadBubble();
   }
@@ -1690,15 +1822,28 @@
     root.classList.toggle('nf-compact', compact);
     root.classList.toggle('nf-portrait', compact && !land);
     root.classList.toggle('nf-land', land);
-    // Laptop with room to spare: a wider side panel with bigger chips and Chinese.
-    const wide = !compact && vw >= 1150;
-    root.classList.toggle('nf-wide', wide);
-    let scale;
+    // Laptop: the canvas is the whole window. The board fills the height; the pairs, the sum and
+    // the hero live in the side columns (each at least RAIL px wide).
+    root.classList.toggle('nf-wide', !compact);
+    let scale, stageW, stageH;
     if (!compact) {
-      const availW = window.innerWidth - (wide ? 400 : 300) - (wide ? 28 : 20) - 36;
-      const availH = window.innerHeight - 24;
-      scale = Math.max(0.4, Math.min(availW / W, availH / H, 1.5));
+      const RAIL = Math.min(300, Math.max(210, vw * 0.2));
+      stageW = vw; stageH = vh;
+      scale = vh / H;
+      W = vw / scale;
+      wideGrid = Math.min(H - 28, (vw - RAIL * 2) / scale);
+      const n = puzzle ? puzzle.n : 5;
+      const gridCss = Math.min(MAX_CELL_WIDE, wideGrid / n) * n * scale;
+      const railCss = (vw - gridCss) / 2;
+      railL = railCss / scale;
+      root.style.setProperty('--rail', `${Math.floor(railCss)}px`);
+      root.classList.toggle('nf-narrow', railCss < 300);
+      root.style.setProperty('--hero', `${Math.round(Math.min(200, railL * 0.6) * scale)}px`);
     } else {
+      W = 800;
+      wideGrid = 0;
+      railL = 0;
+      root.classList.remove('nf-narrow');
       const cs = getComputedStyle(layoutEl);
       const innerW = layoutEl.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
       const innerH = layoutEl.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
@@ -1708,20 +1853,24 @@
         const others = ['.panel-top', '.pairs-box', '.sum-box', '.touchbar']
           .reduce((a, sel) => a + document.querySelector(sel).offsetHeight, 0);
         size = Math.min(innerW, innerH - others - gap * 5 - 54);
+        // The bubble gets what is left: a bigger hero when there is room for one.
+        const left = innerH - others - gap * 5 - Math.max(150, Math.floor(size));
+        root.style.setProperty('--mascot', `${Math.max(34, Math.min(72, Math.floor(left - 22)))}px`);
       } else {
         const gap = parseFloat(cs.columnGap) || 12;
         size = Math.min(innerH, innerW - 250 - gap);
       }
       scale = Math.max(150, Math.floor(size)) / W;
+      stageW = stageH = Math.round(W * scale);
     }
     const dpr = window.devicePixelRatio || 1;
-    stage.style.width = `${Math.round(W * scale)}px`;
-    stage.style.height = `${Math.round(H * scale)}px`;
-    canvas.style.width = `${Math.round(W * scale)}px`;
-    canvas.style.height = `${Math.round(H * scale)}px`;
-    canvas.width = Math.round(W * scale * dpr);
-    canvas.height = Math.round(H * scale * dpr);
-    pixelScale = scale * dpr;
+    stage.style.width = `${stageW}px`;
+    stage.style.height = `${stageH}px`;
+    canvas.style.width = `${stageW}px`;
+    canvas.style.height = `${stageH}px`;
+    canvas.width = Math.round(stageW * dpr);
+    canvas.height = Math.round(stageH * dpr);
+    pixelScale = canvas.height / H;
     ctx.setTransform(pixelScale, 0, 0, pixelScale, 0, 0);
     computeGeo();
   }
@@ -1735,6 +1884,7 @@
     last = now;
     update(dt);
     draw();
+    drawCardHero();
     updateHintBtn();
     requestAnimationFrame(frame);
   }
@@ -1760,6 +1910,18 @@
     isCorrect: (p) => isCorrect(p),
     generate, configFor,
   };
+
+  // Keyboard players: after a few quiet seconds the keys that matter float up (laptop: at the
+  // bottom of the left column). Faster in his first two games.
+  // (MQ.Idle reads a list whose first item is an array as ONE [keys, word] pair, so each pair is
+  // handed over as a Set, which keeps the order but isn't an array.)
+  const keyGroup = (keys, word) => new Set([keys, word]);
+  MQ.Idle.attach(el('idle-host'), {
+    delay: g.played < 2 ? 2500 : 4000,
+    active: () => state === 'play',
+    keys: () => [keyGroup(['←', '↑', '↓', '→'], 'draw'), keyGroup(['space'], 'pick up'), keyGroup(['H'], 'hint')],
+  });
+  el('mascot').innerHTML = MQ.Art.img(heroId, 48);
 
   MQ.Music.play('canon');
   newPuzzle();

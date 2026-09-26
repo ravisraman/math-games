@@ -26,49 +26,22 @@
         <button class="ph-btn" id="ppause" type="button" aria-label="Pause">⏸</button>
         <button class="ph-btn" id="pmusic" type="button" aria-label="Music on or off">🎵</button>
       </div>
+      <!-- Laptop HUD: a slim bar over the top of the board (home · level · windows climbed · caption · stars) -->
+      <div class="topbar" id="topbar">
+        <a class="tb-btn" href="../../index.html" aria-label="Back to the portal">🏠</a>
+        <div class="tb-pill tb-level">Level <b id="level">1</b></div>
+        <div class="tb-wins" id="windows" aria-label="Windows lit"></div>
+        <div class="tb-cap" id="caption" aria-live="polite"></div>
+        <div class="tb-pill tb-stars" id="starpill">⭐ <b id="stars">0</b></div>
+        <button class="tb-btn touch-only" id="tpause" type="button" aria-label="Pause">⏸</button>
+        <button class="tb-btn touch-only" id="tmusic" type="button" aria-label="Music on or off">🎵</button>
+      </div>
       <div class="overlay" id="overlay" hidden></div>
     </div>
-
-    <aside class="panel">
-      <div class="panel-top">
-        <a class="home" href="../../index.html" title="Back to the portal">🏠</a>
-        <div class="level-pill">Level <span id="level">1</span></div>
-        <button class="home touch-only" id="tpause" type="button" aria-label="Pause">⏸</button>
-        <button class="home touch-only" id="tmusic" type="button" aria-label="Music on or off">🎵</button>
-        <div class="star-pill">⭐ <span id="stars">0</span></div>
-      </div>
-
-      <section class="box climb-box">
-        <div class="label">🗼 Tower climb</div>
-        <div class="windows" id="windows"></div>
-        <div class="sub" id="floor">Floor 0 of 8</div>
-      </section>
-
-      <section class="box task-box">
-        <div class="label">🔔 Clock keeper's job</div>
-        <div class="skill" id="skill">—</div>
-        <div class="level-title" id="level-title"></div>
-      </section>
-
-      <section class="bubble" id="bubble" aria-live="polite">
-        <span class="mascot">🐼</span>
-        <span id="message">Let's climb the clock tower!</span>
-      </section>
-
-      <section class="controls keys-only">
-        <div><span class="key">←</span><span class="key">→</span> long hand · choose</div>
-        <div><span class="key">↑</span><span class="key">↓</span> short hand (hour)</div>
-        <div><span class="key">return</span> check</div>
-        <div><span class="key">H</span> hint &nbsp; <span class="key">esc</span> pause &nbsp; <span class="key">M</span> music</div>
-      </section>
-      <section class="controls touch-only">
-        <div>👆 Drag the clock hands, or tap a choice</div>
-        <div>✔ Check · 💡 Hint · ⏸ Pause · 🎵 Music</div>
-      </section>
-    </aside>
   </main>
 
   <script src="../../shared/core.js?v=11"></script>
+  <script src="../../shared/fx.js?v=11"></script>
   <script src="game.js?v=11"></script>
 </body>
 </html>

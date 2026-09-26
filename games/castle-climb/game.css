@@ -123,10 +123,8 @@ body { background: linear-gradient(180deg, #ffe3c4 0%, #fff4e4 55%, #ffeede 100%
   max-width: 500px;
   text-align: center;
   box-shadow: 0 10px 0 rgba(0, 0, 0, 0.12);
-  animation: rise 0.25s ease-out;
   border-top: 8px solid #d8342a;
 }
-@keyframes rise { from { transform: translateY(16px); opacity: 0; } to { transform: none; opacity: 1; } }
 .card h1 { margin: 0 0 6px; font-size: 34px; }
 .card h2 { margin: 0 0 8px; font-size: 26px; }
 .card p { font-size: 19px; margin: 8px 0; }
@@ -162,6 +160,12 @@ body { background: linear-gradient(180deg, #ffe3c4 0%, #fff4e4 55%, #ffeede 100%
 
 .menu { display: grid; gap: 10px; margin-top: 14px; }
 .menu .btn.sel { outline: 4px solid var(--sky); outline-offset: 3px; }
+/* Pause / leave: two big buttons, each with its key. */
+.card.pause .menu { gap: 14px; margin-top: 16px; }
+.card.pause .menu .btn { min-height: 64px; font-size: 26px; display: flex; align-items: center; justify-content: center; gap: 14px; }
+.card.pause .menu .btn .key { font-size: 16px; min-width: 56px; height: 32px; display: inline-grid; place-items: center; color: #444; }
+.card .card-hero { margin: -10px 4px -6px 0; }
+.card .new-hero .hero-img { margin: -8px 2px; }
 
 @media (max-width: 860px) {
   .layout { flex-direction: column; }
@@ -317,3 +321,39 @@ html.lay-landscape .card.result .stats { font-size: 18px; }
 html.lay-landscape .card.result .next { font-size: 17px; }
 html.lay-landscape .card .practice { font-size: 16px; margin-top: 4px; }
 html.lay-landscape .card .floor-now { font-size: 22px; margin: 0; }
+
+/* ---------- Laptop: the scene fills the window, a slim HUD floats over its top corners ---------- */
+html.lay-wide .layout { flex-direction: row; padding: 12px; gap: 0; }
+html.lay-wide .panel { display: contents; }
+html.lay-wide .panel-top {
+  position: absolute; top: 22px; left: 22px; right: 22px; z-index: 6;
+  gap: 10px; pointer-events: none;
+}
+html.lay-wide .panel-top > * { pointer-events: auto; }
+html.lay-wide .home { width: 56px; height: 52px; display: flex; align-items: center; justify-content: center; padding: 0; font-size: 30px; border-radius: 16px; box-shadow: 0 4px 12px rgba(80, 40, 10, 0.25); }
+html.lay-wide .level-pill, html.lay-wide .star-pill { font-size: 26px; padding: 8px 18px; box-shadow: 0 4px 12px rgba(80, 40, 10, 0.25); }
+html.lay-wide .star-pill span { display: inline-block; }
+html.lay-wide .problem-box, html.lay-wide .controls { display: none; }
+/* The floors, as a tall column on the right: floor 1 at the bottom, 10 at the top. */
+html.lay-wide .floor-box {
+  position: absolute; right: 22px; top: 88px; z-index: 6;
+  padding: 8px; border-radius: 18px; background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 4px 12px rgba(80, 40, 10, 0.25);
+}
+html.lay-wide .floor-box .label, html.lay-wide .floor-box .tally { display: none; }
+html.lay-wide .track { flex-direction: column-reverse; gap: 5px; margin: 0; }
+html.lay-wide .track span { flex: none; width: 58px; height: clamp(30px, 4.6vh, 44px); font-size: 20px; border-radius: 10px; }
+/* The panda's message: a short caption at the bottom left (it is spoken too), then it fades. */
+html.lay-wide .bubble {
+  position: absolute; left: 26px; bottom: 26px; z-index: 6;
+  max-width: min(460px, 34vw); min-height: 0;
+  padding: 10px 16px; font-size: 26px; line-height: 1.25; align-items: center;
+  box-shadow: 0 6px 16px rgba(80, 40, 10, 0.25);
+  pointer-events: none; opacity: 0; transition: opacity 0.35s;
+}
+html.lay-wide .bubble.show { opacity: 1; }
+html.lay-wide .layout:has(.overlay:not([hidden])) .bubble { opacity: 0; }
+html.lay-wide .bubble .mascot { font-size: 34px; }
+html.lay-wide .touchbar { position: absolute; right: 22px; bottom: 22px; z-index: 6; width: 280px; }
+/* The idle "esc 🏠" chip sits just under the 🏠 button. */
+html.lay-wide .mq-idle-esc { top: 64px; left: 10px; }

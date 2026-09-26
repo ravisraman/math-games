@@ -493,3 +493,150 @@ html.lay-land .card.intro .row { font-size: 17px; margin-top: 4px; }
 .card .stats { font-size: 18px; flex-wrap: wrap; gap: 4px 18px; }
 .card .stats span { white-space: nowrap; }
 html.lay-land .card.intro .legend { flex-wrap: nowrap; gap: 4px 16px; }
+
+/* ======================================================================
+   Laptop (JS puts lay-wide on <html> when the window is wider than 1000px):
+   a slim top bar with the essentials, and the board filling the rest.
+   ====================================================================== */
+html.lay-wide .layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 25%) auto;
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: "hud bubble bar" "stage stage stage";
+  align-items: stretch;
+  justify-content: stretch;
+  gap: 6px 8px;
+  padding: 6px 6px 6px;
+}
+html.lay-wide .panel { display: contents; }
+html.lay-wide .controls { display: none; }
+html.lay-wide .stage-wrap {
+  grid-area: stage;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+html.lay-wide .stage { border-radius: 18px; }
+html.lay-wide .hud {
+  grid-area: hud;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 8px;
+  height: 64px;
+  min-width: 0;
+}
+html.lay-wide .panel-top { gap: 8px; flex: none; }
+html.lay-wide .home, html.lay-wide .level-pill, html.lay-wide .star-pill {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 18px;
+  box-shadow: 0 3px 0 #cbd9e6;
+}
+html.lay-wide .home { width: 64px; font-size: 32px; padding: 0; }
+html.lay-wide .level-pill { font-size: 26px; padding: 0 16px; }
+html.lay-wide .level-pill .lvl-word { font-size: 17px; color: var(--muted); margin-right: 6px; }
+html.lay-wide .star-pill { font-size: 28px; padding: 0 16px; margin: 0; gap: 6px; }
+html.lay-wide .box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 64px;
+  padding: 0 14px;
+  border-radius: 18px;
+  min-width: 0;
+}
+html.lay-wide .label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 26px;
+  line-height: 1;
+  flex: none;
+}
+html.lay-wide .label .lbl-word { font-size: 13px; line-height: 1.05; max-width: 64px; text-align: center; margin-top: 3px; }
+html.lay-wide .big { font-size: 40px; line-height: 1; white-space: nowrap; flex: none; }
+html.lay-wide .zh.sub { font-size: 16px; min-height: 0; white-space: nowrap; flex: none; }
+html.lay-wide .zh.sub:empty { display: none; }
+html.lay-wide .target-box { flex: none; }
+html.lay-wide .pouch-box { flex: 1 1 auto; }
+html.lay-wide .pouch-box .need { display: none; }
+html.lay-wide .need2 {
+  display: block;
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--sky);
+  max-width: 170px;
+  line-height: 1.15;
+  margin: 0;
+  min-height: 0;
+}
+html.lay-wide .need2.done { color: var(--good); }
+html.lay-wide .pouch-coins {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  gap: 4px;
+}
+html.lay-wide .pouch-coins > * { zoom: var(--chip, 1); flex: none; }
+html.lay-wide .pouch-coins.two-rows { flex-wrap: wrap; align-content: center; height: 60px; gap: 2px 3px; }
+html.lay-wide .bubble {
+  grid-area: bubble;
+  height: 64px;
+  min-height: 0;
+  align-items: center;
+  padding: 0 14px;
+  gap: 10px;
+  font-size: 24px;
+  font-weight: 900;
+  line-height: 1.1;
+  border-radius: 18px;
+  overflow: hidden;
+}
+html.lay-wide .bubble #message {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+html.lay-wide .bubble .mascot { font-size: 36px; }
+html.lay-wide .touchbar { grid-area: bar; }
+html.lay-wide .touchbar .tbtn { height: 64px; }
+html.lay-wide .card { max-width: 540px; }
+
+/* Hero pictures on the cards */
+.card .intro-hero { width: 64px; height: 64px; margin: -10px 4px -8px 0; }
+html.lay-land .card .intro-hero { width: 44px; height: 44px; margin: -8px 2px -6px 0; }
+.card .new-hero .hero-img { margin: -8px 2px; }
+
+/* Pause: two big buttons, each with its key */
+.pause-card { max-width: 420px; }
+.pause-card h2 { font-size: 44px; margin: 0 0 4px; }
+.pause-card .menu { gap: 14px; }
+.pause-card .btn.big {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  min-height: 72px;
+  font-size: 30px;
+  font-weight: 900;
+}
+.pause-card .btn .key { font-size: 17px; color: var(--ink); font-weight: 800; }
+
+/* A wrong bonus answer wobbles a little (no harsh shake) */
+.choice.wrong { animation: wobble 0.45s ease-out; }
+@keyframes wobble {
+  0%, 100% { transform: rotate(0); }
+  20% { transform: rotate(-4deg); }
+  45% { transform: rotate(3deg); }
+  70% { transform: rotate(-1.5deg); }
+}
+@media (prefers-reduced-motion: reduce) { .choice.wrong { animation: none; } }

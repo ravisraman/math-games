@@ -49,12 +49,13 @@
   if (!g.skills || typeof g.skills !== 'object') g.skills = {};
   if (!g.missed || typeof g.missed !== 'object') g.missed = {};
   g.level = Math.max(1, Math.min(MAX_LEVEL, Math.floor(g.level) || 1));
-  const hero = data.player.hero || '🐥';
+  const heroId = MQ.heroId(data.player.hero);
+  MQ.Art.preload(heroId);
   function persist() { MQ.save(data); }
 
   // ---------- DOM ----------
   const canvas = document.getElementById('board');
-  const ctx = canvas.getContext('2d');
+  let ctx = canvas.getContext('2d'); // swapped briefly while the cached background is painted
   const stage = document.getElementById('stage');
   const overlay = document.getElementById('overlay');
   const el = (id) => document.getElementById(id);
@@ -113,6 +114,7 @@
   let stats = null;
   let floorsDone = [];
   let particles = [];
+  const blocks = MQ.FX.blocks(); // block bursts, kept in world coordinates (they ride with the camera)
   let floaters = [];
   let chunks = [];
   let puffs = [];
@@ -225,9 +227,10 @@
 
   function announce() {
     if (!problem) return;
-    const again = problem.source === 'retry' ? 'This one came back! ' : '';
-    say(touchUI() ? `${again}Tap the right answer to jump! 👆` : `${again}What is the answer? Walk under it and jump! ⬆`);
-    MQ.Voice.say(problem.speak, 'en-US', { interrupt: true });
+    const again = problem.source === 'retry' ? '🔁 ' : '';
+    say(touchUI() ? `${again}Tap the answer! 👆` : `${again}Walk ⬅ ➡ then jump ⬆`);
+    if (again) MQ.Voice.say('This one came back!', 'en-US', { interrupt: true });
+    MQ.Voice.say(problem.speak, 'en-US', { interrupt: !again });
   }
 
   // ---------- HUD ----------
@@ -240,10 +243,11 @@
     pe.classList.toggle('long', !!problem && problem.text.length > 10);
     el('problem-zh').textContent = atTop ? (data.settings.chinese ? '你到顶了！' : '') : problem && data.settings.chinese ? problem.zh : '';
     el('floor').textContent = floor;
-    el('track').innerHTML = Array.from({ length: FLOORS }, (_, i) => {
+    const track = Array.from({ length: FLOORS }, (_, i) => {
       const cls = i < floor ? `lit ${floorsDone[i] === 'retry' ? 'retry' : ''}` : i === floor && state !== 'top' && state !== 'result' ? 'now' : '';
       return `<span class="${cls}">${i < floor ? theme.icon : i + 1}</span>`;
     }).join('');
+    if (track !== updateHud.track) { updateHud.track = track; el('track').innerHTML = track; } // unchanged: keep the cells (a flying icon may be heading for one)
     const pl = document.querySelector('.problem-box .label');
     if (pl) pl.textContent = `${theme.icon} Jump to the answer`;
     const fl = document.querySelector('.floor-box .label');
@@ -356,7 +360,7 @@
         // Between two ledges: not under an answer yet, so he just bounces on the spot.
         MQ.Sound.nope();
         heroP.sq = -0.2;
-        say(touchUI() ? 'Tap an answer to jump to it! 👆' : 'Walk under an answer first — use ⬅ ➡',
+        say(touchUI() ? 'Tap an answer! 👆' : 'Walk ⬅ ➡ first',
           { speak: touchUI() ? 'Tap an answer to jump to it!' : 'Walk under an answer first. Use the left and right arrows.' });
         return;
       }
@@ -365,7 +369,7 @@
     if (!ledge.alive) {
       MQ.Sound.nope();
       heroP.sq = -0.2;
-      say(touchUI() ? 'That ledge fell down. Tap another one!' : 'That ledge fell down. Walk ⬅ ➡ to another one!',
+      say(touchUI() ? 'That one fell! Tap another' : 'That one fell! Walk ⬅ ➡',
         { speak: touchUI() ? 'That ledge fell down. Tap another one!' : 'That ledge fell down. Walk to another one!' });
       return;
     }
@@ -489,6 +493,8 @@
     MQ.Sound.coin(25);
     if (speedy) MQ.Sound.note(96, 'bell', { delay: 0.18, dur: 1.2, vel: 0.1 });
     sparkle(x, y - 40, 22);
+    blocks.burst(x, y - 30 - camOff(), undefined, 18, 0.9);
+    setMood('happy', 1.6);
     const praise = MQ.pick(MQ.PRAISE);
     floater(x, y - 95, data.settings.chinese ? praise.zh : praise.en, '#e0452e');
     if (speedy) floater(Math.min(W - 80, TX1 + 20), 140, '✨ Speedy!', '#d99a00', 0.1);
@@ -505,6 +511,10 @@
     camFrom = cam;
     camTo = floor >= FLOORS ? FLOORS + (layout === 'wide' ? 0.45 : (H - 8 - HERO_Y) / FH) : floor;
     updateHud();
+    // The floor's icon flies from the ledge into the floor track.
+    const cell = el('track').children[floor - 1];
+    const r = canvas.getBoundingClientRect();
+    if (cell && r.width) MQ.FX.flyStar(r.left + (x / W) * r.width, r.top + ((y - 40) / H) * r.height, cell, { glyph: theme.icon, delay: 120 });
   }
 
   function onWrong() {
@@ -563,7 +573,7 @@
     MQ.Sound.open();
     setTimeout(() => MQ.Sound.win(), 700);
     const praise = MQ.pick(MQ.PRAISE);
-    say(`🎉 You reached the top! ${praise.zh} ${praise.en}`);
+    say(`🎉 The top! ${praise.en}`);
     if (data.settings.chinese) MQ.Voice.say(`${praise.zh} 你到顶了!`, 'zh-CN', { interrupt: true });
     else MQ.Voice.say(`${praise.en} You reached the top!`, 'en-US', { interrupt: true });
     for (let i = 0; i < 14; i++) skyLanterns.push(newSkyLantern(true));
@@ -625,7 +635,7 @@
     const practice = [...new Set(s.missedKeys)].slice(0, 4);
     showOverlay(`
       <div class="card result" data-enter>
-        <h2>${theme.emoji} You reached the top!</h2>
+        <h2>${MQ.Art.img(heroId, 64, 'card-hero')} You reached the top!</h2>
         <div class="stars-row">${starHtml}</div>
         <div class="praise"><span class="zh">${praise.zh}</span><small>${praise.py} · ${praise.en}</small></div>
         <div class="stats">
@@ -635,12 +645,18 @@
         </div>
         ${practice.length ? `<div class="practice">🔁 <b>${practice.map(MQ.escapeHtml).join(' · ')}</b></div>` : ''}
         <div class="next ${move.kind}">${move.text}</div>
-        ${newHero ? `<div class="next">🎉 New hero: ${newHero.emoji} ${MQ.escapeHtml(newHero.name)}!</div>` : ''}
+        ${newHero ? `<div class="next new-hero">🎉 New hero: ${MQ.Art.img(newHero.id, 56)} ${MQ.escapeHtml(newHero.name)}!</div>` : ''}
         <div class="press keys-only">Press <span class="key">return</span></div>
         <button class="btn go touch-only">▶ Climb again</button>
       </div>`,
       (k) => { if (k === 'Enter') { MQ.Sound.click(); newClimb(); showIntro(); } }, true, 1500
     );
+    // The stars he earned fly into the ⭐ counter.
+    const pill = document.querySelector('.star-pill');
+    overlay.querySelectorAll('.stars-row span:not(.off)').forEach((sp, i) => {
+      const r = sp.getBoundingClientRect();
+      MQ.FX.flyStar(r.left + r.width / 2, r.top + r.height / 2, pill, { delay: 450 + i * 220 });
+    });
     // Say the result out loud too (he may not read it yet).
     const starWord = ['', 'One star', 'Two stars', 'Three stars'][stars];
     const spoken = move.kind === 'up2' ? `${starWord}! Perfect climb! You jump up two levels!`
@@ -661,6 +677,7 @@
     overlayKeys = keys;
     if (!redraw) { overlayShownAt = performance.now(); overlayGuard = guard; } // a menu redraw keeps the clock
     const shownAt = overlayShownAt;
+    if (!redraw) MQ.FX.popIn(overlay.querySelector('.card'));
     const card = overlay.querySelector('[data-enter]');
     // A tap too soon after the card appears is a leftover from play — don't skip the card.
     if (card) card.addEventListener('click', () => { if (performance.now() - shownAt > Math.max(900, guard) && keys) keys('Enter'); });
@@ -678,7 +695,7 @@
     const ex = lv.example.includes('?') ? lv.example : `${lv.example} = ?`;
     showOverlay(`
       <div class="card intro" data-enter>
-        <h1>${hero} Level ${g.level}</h1>
+        <h1>${MQ.Art.img(heroId, 76, 'card-hero')} Level ${g.level}</h1>
         <div class="goal">${MQ.escapeHtml(lv.name)}</div>
         ${zh}
         <div class="example">${MQ.escapeHtml(ex)}</div>
@@ -697,7 +714,7 @@
     const levelName = lv.name.replace('·', '.').replace('±', 'plus or minus').replace('&', 'and');
     if (first) MQ.Voice.say(`Welcome to Castle Climb! ${how}, and climb 10 floors to the top. A wrong ledge crumbles, so just try again!`, 'en-US', { interrupt: true });
     else MQ.Voice.say(`Let's climb the ${theme.name}! Level ${g.level}: ${levelName}. ${how}, 10 floors to the top!`, 'en-US', { interrupt: true });
-    say(touchUI() ? 'Tap Start to climb!' : 'Press return to start climbing!');
+    say(touchUI() ? 'Tap Start to climb!' : 'Press return to start!');
     updateHud();
   }
 
@@ -709,32 +726,35 @@
     tapHintOn = touchUI() && !g.tapHintDone;
   }
 
-  function showPause() {
-    resumeState = state;
-    state = 'pause';
+  // Pause (esc / ⏸) and "Leave the climb?" (🏠) are the same two big buttons:
+  // ▶ Play [return] and 🏠 Home [esc]. The card itself is the "are you sure?", so esc, esc = home.
+  function goHome() { persist(); location.href = '../../index.html'; }
+  function showPause(leave = false) {
+    if (PLAYING.has(state)) { resumeState = state; state = 'pause'; }
     MQ.Voice.stop();
     let sel = 0;
     const items = [
-      ['▶ Keep playing', () => { hideOverlay(); state = resumeState; }],
-      ['🏠 Back to the portal', () => { persist(); location.href = '../../index.html'; }],
+      [`▶ ${leave ? 'Keep climbing' : 'Play'}`, 'return', () => { hideOverlay(); state = resumeState; idleClock = 0; }],
+      ['🏠 Home', 'esc', goHome],
     ];
     let drawn = false;
     const render = () => {
       showOverlay(`
-        <div class="card">
-          <h2>⏸ Paused</h2>
-          <div class="menu">${items.map((it, i) => `<button class="btn ${i === 0 ? '' : 'secondary'} ${i === sel ? 'sel' : ''}" data-i="${i}">${it[0]}</button>`).join('')}</div>
-          <div class="press keys-only"><span class="key">↑</span> <span class="key">↓</span> <span class="key">return</span></div>
+        <div class="card pause ${leave ? 'leave' : ''}">
+          <h2>${leave ? '🏠 Leave the climb?' : '⏸ Paused'}</h2>
+          ${leave ? `<div class="floor-now">${theme.emoji} ${floor} / 10</div>` : ''}
+          <div class="menu">${items.map((it, i) => `<button class="btn ${i === 0 ? '' : 'secondary'} ${i === sel ? 'sel' : ''}" data-i="${i}">${it[0]}<span class="key keys-only">${it[1]}</span></button>`).join('')}</div>
         </div>`,
         (k) => {
-          if (k === 'ArrowUp' || k === 'ArrowDown') { sel = 1 - sel; MQ.Sound.click(); render(); }
-          else if (k === 'Enter' || k === ' ') items[sel][1]();
-          else if (k === 'Escape') items[0][1]();
+          if (k.startsWith('Arrow')) { sel = 1 - sel; MQ.Sound.click(); render(); }
+          else if (k === 'Enter' || k === ' ') items[sel][2]();
+          else if (k === 'Escape') goHome();
         }, false, 250, drawn);
       drawn = true;
-      overlay.querySelectorAll('.menu .btn').forEach((b) => b.addEventListener('click', () => items[Number(b.dataset.i)][1]()));
+      overlay.querySelectorAll('.menu .btn').forEach((b) => b.addEventListener('click', () => items[Number(b.dataset.i)][2]()));
     };
     render();
+    if (leave) MQ.Voice.say(`Leave the climb? You are on floor ${floor}. Keep climbing, or go home?`, 'en-US', { interrupt: true });
   }
 
   // 🏠 during a climb asks first, so one stray tap doesn't throw the climb away.
@@ -745,35 +765,9 @@
       e.preventDefault();
       homeLink.blur();
       MQ.Sound.click();
-      showLeave();
+      if (state !== 'pause') showPause(true);
+      else goHome(); // 🏠 while already paused: that was the second "yes"
     });
-  }
-  function showLeave() {
-    if (PLAYING.has(state)) { resumeState = state; state = 'pause'; }
-    let sel = 0;
-    const items = [
-      ['🧗 Keep climbing', () => { hideOverlay(); state = resumeState; }],
-      ['🏠 Go home', () => { persist(); location.href = '../../index.html'; }],
-    ];
-    let drawn = false;
-    const render = () => {
-      showOverlay(`
-        <div class="card leave">
-          <h2>🏠 Leave the climb?</h2>
-          <div class="floor-now">${theme.emoji} ${floor} / 10</div>
-          <div class="menu">${items.map((it, i) => `<button class="btn ${i === 0 ? '' : 'secondary'} ${i === sel ? 'sel' : ''}" data-i="${i}">${it[0]}</button>`).join('')}</div>
-          <div class="press keys-only"><span class="key">↑</span> <span class="key">↓</span> <span class="key">return</span></div>
-        </div>`,
-        (k) => {
-          if (k === 'ArrowUp' || k === 'ArrowDown' || k === 'ArrowLeft' || k === 'ArrowRight') { sel = 1 - sel; MQ.Sound.click(); render(); }
-          else if (k === 'Enter' || k === ' ') items[sel][1]();
-          else if (k === 'Escape') items[0][1]();
-        }, false, 250, drawn);
-      drawn = true;
-      overlay.querySelectorAll('.menu .btn').forEach((b) => b.addEventListener('click', () => items[Number(b.dataset.i)][1]()));
-    };
-    render();
-    MQ.Voice.say(`Leave the climb? You are on floor ${floor}. Keep climbing, or go home?`, 'en-US', { interrupt: true });
   }
 
   // ---------- Effects ----------
@@ -816,6 +810,8 @@
       if (c.x < -160) c.x = W + 160;
     }
     if (state === 'pause') return;
+    moodT += dt;
+    blocks.update(dt);
 
     if (PLAYING.has(state)) {
       stats.seconds += dt;
@@ -830,7 +826,7 @@
       if (idleClock > nudgeAt) {
         nudged = true;
         nudgeAt = idleClock + 25; // then again every 25 s
-        say(touchUI() ? 'Tap the right answer to jump up! 👆' : 'Walk ⬅ ➡ under the right answer, then press ⬆ to jump!');
+        say(touchUI() ? 'Tap the right answer! 👆' : 'Walk ⬅ ➡ then jump ⬆');
         MQ.Voice.say(`${problem.speak} ${touchUI() ? 'Tap the right answer.' : 'Walk under the right answer and jump.'}`, 'en-US', { interrupt: true });
       }
     }
@@ -863,7 +859,8 @@
         heroP.sq = 0.35;
         heroP.sqV = 0;
         dust(laneX(heroP.lane), sy(floor), 10);
-        floater(laneX(heroP.lane), sy(floor) - 90, '💫', '#fff');
+        floater(laneX(heroP.lane), sy(floor) - 110, '💫', '#fff');
+        setMood('oops', 0.9);
         queuedMove = 0;
         queuedJump = false;
         idleClock = 0;
@@ -1419,67 +1416,46 @@
     return { x, y };
   }
 
+  // The block-animal hero: 'walk' while hopping, 'happy' on a right answer and at the top,
+  // 'oops' (with a little wobble) while a wrong ledge shakes and crumbles.
+  const heroSize = () => (layout === 'wide' ? 92 : 80);
+  let mood = null;
+  let moodT = 0;
+  let moodDur = 0;
+  function setMood(pose, dur) { mood = pose; moodT = 0; moodDur = dur; }
+  function heroPose() {
+    if (state === 'top' || state === 'result' || state === 'climb') return 'happy';
+    if (state === 'shake' || state === 'fall') return 'oops';
+    if (mood && moodT < moodDur) return mood;
+    if (heroP.t < 1) return 'walk';
+    return 'idle';
+  }
   function drawHero() {
     const { x, y } = heroPos();
     // Shadow on the floor below him.
     const ground = state === 'shake' ? sy(floor + 1) : sy(floor);
     const lift = clamp((ground - y) / 260, 0, 1);
-    ctx.fillStyle = `rgba(40,20,10,${0.28 * (1 - lift * 0.7)})`;
-    ctx.beginPath(); ctx.ellipse(x, ground - 2, 22 * (1 - lift * 0.5), 6 * (1 - lift * 0.5), 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = `rgba(40,20,10,${0.26 * (1 - lift * 0.7)})`;
+    ctx.beginPath(); ctx.ellipse(x, ground - 2, 30 * (1 - lift * 0.5), 8 * (1 - lift * 0.5), 0, 0, Math.PI * 2); ctx.fill();
 
-    let sq = heroP.sq + (state === 'play' && heroP.t >= 1 ? Math.sin(time * 3) * 0.02 : 0);
+    let sq = heroP.sq;
     if (state === 'jump') sq -= 0.18 * Math.sin(Math.PI * heroP.jt) * (heroP.jt < 0.5 ? 1 : 0.6);
     if (state === 'fall') sq -= 0.15;
     sq = clamp(sq, -0.35, 0.4);
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.scale(1 + sq, 1 - sq);
-    ctx.font = `58px ${EMOJI_FONT}`;
-    ctx.fillStyle = '#000'; // color emoji inherit the fill's opacity
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(hero, 0, -32);
-    ctx.restore();
-
-    // A bobbing "jump" arrow when he has been waiting a bit.
-    const wait = g.played < 2 ? 2.5 : 6;
-    if (state === 'play' && heroP.lane === HOME && heroP.t >= 1 && idleClock > wait && !touchUI()) {
-      // At the doorway: the same bobbing arrow on BOTH sides — walk either way.
-      const a = clamp((idleClock - wait) * 2, 0, 1);
-      ctx.globalAlpha = a;
-      const bob = Math.sin(time * 6) * 5;
-      for (const d of [-1, 1]) {
-        const ax = x + d * (56 + bob);
-        const ay = y - 34;
-        ctx.fillStyle = '#fff';
-        ctx.strokeStyle = '#d99a00';
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        ctx.moveTo(ax + d * 18, ay); ctx.lineTo(ax, ay - 16); ctx.lineTo(ax, ay - 7); ctx.lineTo(ax - d * 16, ay - 7);
-        ctx.lineTo(ax - d * 16, ay + 7); ctx.lineTo(ax, ay + 7); ctx.lineTo(ax, ay + 16); ctx.closePath();
-        ctx.fill(); ctx.stroke();
-      }
-      if (lanes % 2 === 1) upArrow(x, y - 92 + bob); // ...and he can jump to the ledge right above
-      ctx.globalAlpha = 1;
-    } else if (state === 'play' && heroP.lane >= 0 && idleClock > wait && problem && problem.ledges[heroP.lane].alive) {
-      const a = clamp((idleClock - wait) * 2, 0, 1);
-      ctx.globalAlpha = a;
-      upArrow(x, y - 92 + Math.sin(time * 6) * 6);
-      ctx.globalAlpha = 1;
-    }
-  }
-  function upArrow(x, ay) {
-    ctx.fillStyle = '#fff';
-    ctx.strokeStyle = '#d99a00';
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.moveTo(x, ay - 18); ctx.lineTo(x + 16, ay); ctx.lineTo(x + 7, ay); ctx.lineTo(x + 7, ay + 16);
-    ctx.lineTo(x - 7, ay + 16); ctx.lineTo(x - 7, ay); ctx.lineTo(x - 16, ay); ctx.closePath();
-    ctx.fill(); ctx.stroke();
+    const hop = state === 'play' && heroP.t < 1 ? MQ.FX.hopShape(heroP.t) : { sx: 1, sy: 1 };
+    const pose = heroPose();
+    // Wrong answer: a gentle side-to-side wobble (no harsh shake).
+    let tilt = 0;
+    if (state === 'shake') tilt = Math.sin(time * 16) * 0.08 * clamp(shakeT * 2, 0, 1);
+    else if (mood === 'oops' && moodT < moodDur) tilt = Math.sin(moodT * 14) * 0.1 * (1 - moodT / moodDur);
+    MQ.Art.drawHero(ctx, heroId, x, y, heroSize(), {
+      pose, t: time, sx: (1 + sq) * hop.sx, sy: (1 - sq) * hop.sy, tilt, shadow: false,
+    });
   }
 
   function drawEffects() {
     const off = camOff();
+    if (blocks.count) { ctx.save(); ctx.translate(0, off); blocks.draw(ctx); ctx.restore(); }
     for (const p of puffs) {
       ctx.globalAlpha = clamp(p.life / p.max, 0, 1) * 0.7;
       ctx.fillStyle = '#fffaf0';
@@ -1661,7 +1637,7 @@
     if (!hintOn || !problem || problem.done || state === 'top' || state === 'result') return;
     const text = problem.tries >= 2 ? problem.full : `💡 ${problem.tip}`;
     const y = (data.settings.chinese ? 112 : 84) + 30;
-    const maxW = Math.min(600, W - 80);
+    const maxW = Math.min(W > 1100 ? 780 : 600, W - 80);
     const limit = state === 'play' || state === 'jump' ? sy(floor + 1) - 12 : H; // keep the ledges uncovered
     let fs = 23;
     let lines;
@@ -1673,7 +1649,7 @@
       if (fs <= 17 || y + lines.length * lh + 28 <= limit) break;
       fs -= 1;
     }
-    const w = Math.min(Math.min(660, W - 36), Math.max(...lines.map((l) => ctx.measureText(l).width)) + 60);
+    const w = Math.min(Math.min(W > 1100 ? 840 : 660, W - 36), Math.max(...lines.map((l) => ctx.measureText(l).width)) + 60);
     const h = lines.length * lh + 28;
     const x = W / 2 - w / 2;
     ctx.save();
@@ -3698,10 +3674,34 @@
     theme = vs ? Object.assign({}, base, vs[(g.level - 1) % vs.length]) : base;
   }
 
+  // The sky and the distant scenery only change when the camera moves (or slowly, for twinkling
+  // stars and waves), so they are painted into a cached layer instead of every frame.
+  const bg = { canvas: document.createElement('canvas'), key: '', theme: null, at: -1 };
+  const bgAnimated = () => theme.night || heightT() > 0.6 || theme.id === 'temple' || theme.id === 'lighthouse';
+  function drawBackground() {
+    const key = `${W}|${H}|${pixelScale}|${cam.toFixed(4)}`;
+    if (key !== bg.key || theme !== bg.theme || (bgAnimated() && time - bg.at > 0.1)) {
+      const c = bg.canvas;
+      const pw = Math.round(W * pixelScale);
+      const ph = Math.round(H * pixelScale);
+      if (c.width !== pw || c.height !== ph) { c.width = pw; c.height = ph; }
+      const main = ctx;
+      ctx = c.getContext('2d');
+      ctx.setTransform(pixelScale, 0, 0, pixelScale, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+      drawSky();
+      theme.backdrop();
+      ctx = main;
+      bg.key = key; bg.theme = theme; bg.at = time;
+    }
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(bg.canvas, 0, 0);
+    ctx.restore();
+  }
+
   function draw() {
-    ctx.clearRect(0, 0, W, H);
-    drawSky();
-    theme.backdrop();
+    drawBackground();
     drawClouds();
     drawSkyLanterns();
     drawTower();
@@ -3730,12 +3730,15 @@
     let cssW;
     let cssH;
     let scale;
+    const oldW = W;
     if (layout === 'wide') {
-      setGeometry(880, 760);
-      const narrow = window.innerWidth <= 860;
-      const availW = narrow ? window.innerWidth - 24 : window.innerWidth - 300 - 20 - 36;
-      const availH = narrow ? window.innerHeight * 0.7 : window.innerHeight - 24;
-      scale = Math.max(0.4, Math.min(availW / W, availH / H, 1.5));
+      // Laptop: the scene fills the window (the HUD floats over its top corners). It is always
+      // 760 units tall; a wide window just shows more scenery on both sides of the tower.
+      const availW = Math.max(300, window.innerWidth - 24);
+      const availH = Math.max(300, window.innerHeight - 24);
+      const logicalW = clamp((availW / availH) * 760, 880, 1900);
+      setGeometry(logicalW, 760);
+      scale = Math.min(availW / W, availH / H);
       cssW = Math.round(W * scale);
       cssH = Math.round(H * scale);
       stage.style.width = `${cssW}px`;
@@ -3756,6 +3759,7 @@
     canvas.height = Math.round(cssH * dpr);
     pixelScale = (cssW / W) * dpr;
     ctx.setTransform(pixelScale, 0, 0, pixelScale, 0, 0);
+    if (W !== oldW) for (const c of clouds) c.x = ((c.x + 160) / (oldW + 320)) * (W + 320) - 160; // spread the clouds over the new width
     if (floor >= FLOORS && camTo > FLOORS) { camTo = FLOORS + (layout === 'wide' ? 0.45 : (H - 8 - HERO_Y) / FH); if (state !== 'climb') cam = camTo; }
   }
   let resizeQueued = false;
@@ -3815,6 +3819,18 @@
     get stats() { return stats; },
     problems: P,
   };
+
+  // Key reminders float up when he has not pressed anything for a while (keyboard only).
+  MQ.Idle.attach(stage, {
+    delay: g.played < 2 ? 2500 : 4000,
+    active: () => state === 'play' && !!problem && !touchUI(),
+    keys: () => {
+      const walk = [['←', '→'], 'walk'];
+      const hear = [['↓'], 'hear it'];
+      const canJump = heroP.lane === HOME ? lanes % 2 === 1 : problem.ledges[heroP.lane].alive;
+      return canJump ? [walk, [['↑', 'space'], 'jump'], hear] : [walk, hear];
+    },
+  });
 
   resize();
   MQ.Music.play('elise');
