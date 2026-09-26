@@ -3,13 +3,18 @@
 const CACHE = 'math-quest-v11';
 const FILES = [
   './', 'index.html', 'portal.css', 'portal.js', 'manifest.webmanifest',
-  'shared/core.js', 'shared/style.css',
+  'shared/core.js', 'shared/style.css', 'shared/fx.js', 'shared/wash.js', 'shared/town-data.js',
+  'shared/vendor/three.module.min.js', 'shared/vendor/addons/loaders/GLTFLoader.js', 'shared/vendor/addons/utils/BufferGeometryUtils.js',
+  'town/index.html', 'town/town.js', 'town/town.css', 'games/coin-crossing/world3d.js',
   'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png',
   'games/coin-crossing/index.html', 'games/coin-crossing/game.css', 'games/coin-crossing/game.js',
   'games/number-flow/index.html', 'games/number-flow/game.css', 'games/number-flow/game.js',
   'games/clock-tower/index.html', 'games/clock-tower/game.css', 'games/clock-tower/game.js',
   'games/castle-climb/index.html', 'games/castle-climb/game.css', 'games/castle-climb/game.js', 'games/castle-climb/problems.js',
 ];
+
+// Pictures and 3D models are cached the first time they load (see fetch below), so only the
+// hero he has picked and the pieces he sees are downloaded; they then work offline too.
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
