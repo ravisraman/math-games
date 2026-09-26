@@ -110,7 +110,10 @@ function trayItems() {
   const items = [];
   const owned = new Set(TOWN.earnedFor(data).map((p) => p.id));
   owned.add('tent');
-  for (const p of TOWN.earned) if (owned.has(p.id)) items.push({ id: p.id, kind: 'earned' });
+  // Newest pieces he still has first, then the ones already in his town.
+  const mine = TOWN.earned.filter((p) => owned.has(p.id)).reverse();
+  for (const p of mine) if (leftOf(p.id) > 0) items.push({ id: p.id, kind: 'earned' });
+  for (const p of mine) if (leftOf(p.id) <= 0) items.push({ id: p.id, kind: 'earned' });
   const N = TOWN.earned.length;
   for (let i = R, n = 0; i < N && n < 3; i++, n++) if (!owned.has(TOWN.earned[i].id)) items.push({ id: TOWN.earned[i].id, kind: 'locked', rounds: i - R + 1 });
   for (const p of TOWN.free) items.push({ id: p.id, kind: 'free' });
@@ -135,7 +138,7 @@ function renderTray() {
     const badge = it.kind === 'earned' ? `<span class="badge">${left}</span>` : '';
     const cls = ['card', it.kind, sel === it.id ? 'on' : '', left === 0 ? 'empty' : '', newest && newest.id === it.id && left > 0 ? 'new' : ''].join(' ');
     html += `<button class="${cls}" data-id="${it.id}" type="button" tabindex="-1" aria-label="${MQ.escapeHtml(p.name)}">
-      <img src="${ART}${it.id}.webp" alt="" draggable="false"><span class="nm">${MQ.escapeHtml(p.name)}</span>${badge}</button>`;
+      <img src="${ART}${it.id}.webp" alt="" draggable="false"><span class="nm${p.name.length > 9 ? ' long' : ''}">${MQ.escapeHtml(p.name)}</span>${badge}</button>`;
   }
   $('tray-list').innerHTML = html;
 }
@@ -292,11 +295,20 @@ function createWorld(stage) {
     const ring = Math.min(x - (X0 - BORDER), X0 + GW + BORDER - 1 - x, z - (Z0 - BORDER), Z0 + GH + BORDER - 1 - z);
     const corner = (x < X0 || x >= X0 + GW) && (z < Z0 || z >= Z0 + GH);
     const dx = x + 0.5 - pondC.x, dz = z + 0.5 - pondC.z;
-    if (ring >= 1 && dx * dx / 2.2 + dz * dz / 7 < 1) { cellType.set(key(x, z), 'pond'); continue; }
+    if (ring >= 1 && dx * dx / 2.6 + dz * dz / 5.5 < 1 && !inGrid(x, z)) { cellType.set(key(x, z), 'pond'); continue; }
     if (ring === 0) {
       if (corner && ((x === X0 - BORDER || x === X0 + GW + BORDER - 1) && (z === Z0 - BORDER || z === Z0 + GH + BORDER - 1))) continue; // rounded corners
       cellType.set(key(x, z), 'sand');
     } else cellType.set(key(x, z), ring === 1 ? 'meadow' : 'near');
+  }
+  // A sandy shore round the pond.
+  for (const [k, t] of [...cellType]) {
+    if (t !== 'pond') continue;
+    const [x, z] = k.split(',').map(Number);
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+      const nk = key(x + dx, z + dz);
+      if (cellType.get(nk) === 'meadow' || cellType.get(nk) === 'near') cellType.set(nk, 'shore');
+    }
   }
   const top = new THREE.BoxGeometry(1, 0.22, 1);
   const dirt = new THREE.BoxGeometry(1, 1.4, 1);
@@ -305,10 +317,10 @@ function createWorld(stage) {
   const dirtMesh = new THREE.InstancedMesh(dirt, new THREE.MeshLambertMaterial({ color: '#9b6a42' }), cells.length);
   topMesh.receiveShadow = true; dirtMesh.receiveShadow = true;
   const m4 = new THREE.Matrix4(), col = new THREE.Color();
-  const COLORS = { grid: ['#8fd35c', '#86cb54'], meadow: ['#7cc24c', '#78bd48'], near: ['#80c64f', '#7bc14b'], sand: ['#f2dca0', '#eed597'], pond: ['#d9c08a', '#d4bb85'] };
+  const COLORS = { grid: ['#8fd35c', '#86cb54'], meadow: ['#7cc24c', '#78bd48'], near: ['#80c64f', '#7bc14b'], sand: ['#f2dca0', '#eed597'], shore: ['#f0d89a', '#ecd294'], pond: ['#d9c08a', '#d4bb85'] };
   cells.forEach(([k, t], i) => {
     const [x, z] = k.split(',').map(Number);
-    const y = t === 'sand' ? -0.2 : t === 'pond' ? -0.75 : 0;
+    const y = t === 'sand' || t === 'shore' ? -0.2 : t === 'pond' ? -0.75 : 0;
     m4.makeTranslation(x + 0.5, y - 0.11, z + 0.5); topMesh.setMatrixAt(i, m4);
     const c = COLORS[t][(x + z) & 1];
     col.set(c); if (t !== 'grid') col.offsetHSL(0, 0, (rnd() - 0.5) * 0.025); topMesh.setColorAt(i, col);
@@ -731,7 +743,7 @@ function createWorld(stage) {
   const baseYaw = () => (W / H < 0.95 ? Math.PI / 2 : 0) + 0.14;
   const yawTarget = () => baseYaw() + yawIndex * Math.PI / 2;
   camYaw = 0;
-  const PITCH = () => (W / H < 0.95 ? 1.02 : 0.92);
+  const PITCH = () => (W / H < 0.95 ? 1.12 : W / H > 1.8 ? 0.8 : 0.92);
   function fitView(yaw) {
     const pitch = PITCH();
     const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
@@ -741,7 +753,7 @@ function createWorld(stage) {
     const target = new THREE.Vector3(X0 + GW / 2, 0, Z0 + GH / 2);
     let dist = 24;
     // leave room for the top bar
-    const topPx = 70, usable = (H - topPx) / H;
+    const topPx = H < 500 ? 34 : 70, usable = (H - topPx) / H;
     for (let i = 0; i < 24; i++) {
       camera.position.copy(target).addScaledVector(dir, dist);
       camera.lookAt(target); camera.updateMatrixWorld();
@@ -938,11 +950,13 @@ if (gl) {
 } else {
   $('loading').hidden = true;
   $('nogl').hidden = false;
+  document.body.classList.add('no-gl');
 }
 
 // Welcome
 const R0 = roundsDone();
-if (R0 === 0) setTimeout(() => say('Play a game to earn your first house! 🏠', { speak: firstVisit, ms: 6000 }), 700);
+if (!gl) { /* the fallback card says it all */ }
+else if (R0 === 0) setTimeout(() => say(firstVisit ? 'This is your town! Play a game to earn your first house! 🏠' : 'Play a game to earn your first house! 🏠', { speak: firstVisit, ms: 6500 }), 700);
 else if (firstVisit) setTimeout(() => say('This is your town! Pick a piece and place it.', { speak: true, ms: 6000 }), 700);
 else if (newest && leftOf(newest.id) > 0) setTimeout(() => say(`New: ${newest.name}! Put it in your town.`, { ms: 4500 }), 700);
 

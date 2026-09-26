@@ -459,3 +459,17 @@ html.nf-wide .sub { font-size: clamp(20px, calc(var(--rail) * 0.08), 26px); }
 html.nf-narrow .bubble { font-size: 23px; }
 html.nf-portrait .bubble { justify-content: center; }
 html.nf-portrait .bubble .mascot .hero-img { width: var(--mascot, 36px); height: var(--mascot, 36px); }
+
+/* ---------- Wash-to-reveal: the muddy badge and the result card's wash ---------- */
+.wash-slot { display: flex; flex: none; }
+.wash-slot:empty { display: none; }
+html.nf-wide .wash-slot { position: fixed; right: 18px; top: 16px; z-index: 6; }
+html.nf-narrow .wash-slot { right: 14px; }
+html.nf-wide .sum-box { top: 96px; }
+.card .wash-host:empty { display: none; }
+.card .wash-host { margin: 2px 0 4px; }
+.card.has-wash .card-hero { display: none; }
+.card.has-wash .stars-row { margin: 0; }
+.result-go { display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; margin-top: 12px; }
+.result-go .press, .result-go .go { margin-top: 0; }
+.town-btn { text-decoration: none; font-size: 18px; min-height: 48px; display: inline-flex; align-items: center; }

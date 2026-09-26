@@ -657,3 +657,15 @@ html.lay-land .card .intro-hero { width: 44px; height: 44px; margin: -8px 2px -6
   html.lay-wide .bubble { font-size: 22px; padding: 0 10px; }
   html.lay-wide .bubble .mascot { font-size: 30px; }
 }
+
+/* ---- Wash-to-reveal: the muddy town piece in the top bar, and the wash on the result card ---- */
+.wash-slot { display: flex; align-items: center; justify-content: center; flex: none; }
+.wash-slot:empty { display: none; }
+html.lay-wide .wash-slot { height: 64px; }
+html.lay-port .hud { grid-template-columns: auto auto minmax(0, 1fr) auto auto; grid-template-areas: "home level target wash star" "pouch pouch pouch pouch pouch"; }
+html.lay-port .wash-slot { grid-area: wash; }
+.wash-host { margin: 4px 0 2px; }
+.wash-host:empty { display: none; }
+.result-btns { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 10px; margin-top: 8px; }
+.result-btns .btn { margin: 0; }
+.town-btn { text-decoration: none; font-size: 17px; padding: 10px 16px; }

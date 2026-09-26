@@ -59,6 +59,8 @@
         </span>
       </button>`).join('');
 
+    renderTown();
+
     const heroNow = MQ.heroId(data.player.hero);
     $('heroes').innerHTML = MQ.HEROES.map((h) => {
       const locked = data.stars < h.stars;
@@ -70,7 +72,29 @@
     }).join('');
   }
 
+  // ---------- My Town entry: how many pieces he has earned, with the newest ones pictured ----------
+  function renderTown() {
+    const el = $('town-tile');
+    if (!el || !MQ.TOWN) return;
+    const owned = MQ.TOWN.roundsDone(data);
+    const list = MQ.TOWN.earnedFor(data);
+    const pics = (list.length ? list.slice(-3) : [MQ.TOWN.earned[0]]).reverse();
+    const placed = data.town && Array.isArray(data.town.placed) ? data.town.placed.length : 0;
+    el.innerHTML = `
+      <span class="town-art" aria-hidden="true">${pics.map((p, i) => `<img class="tp tp${i}" src="shared/art/town/${p.id}.webp" alt="" draggable="false">`).join('')}</span>
+      <span class="town-body">
+        <span class="town-name">🏡 My Town</span>
+        <span class="town-count">${owned ? `${owned} ${owned === 1 ? 'piece' : 'pieces'}` : 'Play to earn a house!'}</span>
+        <span class="town-go">▶ ${placed ? 'Build!' : 'Start building!'}</span>
+      </span>`;
+  }
+
   document.addEventListener('click', (e) => {
+    if (e.target.closest('#town-tile')) {
+      MQ.Sound.click();
+      location.href = 'town/index.html';
+      return;
+    }
     const tile = e.target.closest('[data-game]');
     if (tile) {
       const game = GAMES.find((g) => g.id === tile.dataset.game);

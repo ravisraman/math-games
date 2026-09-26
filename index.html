@@ -36,8 +36,16 @@
     <h2 class="section">Pick a game <span class="tip touch-only">tap a game to play</span> <span class="tip keys-only">use <span class="key">←</span><span class="key">→</span><span class="key">↑</span><span class="key">↓</span> and <span class="key">return</span></span></h2>
     <div class="games" id="games"></div>
 
-    <h2 class="section">Your hero</h2>
-    <div class="heroes" id="heroes"></div>
+    <div class="lower">
+      <section class="town-sec">
+        <h2 class="section">Your town</h2>
+        <button class="town-tile nav" id="town-tile" type="button" aria-label="My Town"></button>
+      </section>
+      <section class="hero-sec">
+        <h2 class="section">Your hero</h2>
+        <div class="heroes" id="heroes"></div>
+      </section>
+    </div>
   </main>
 
   <footer>
@@ -64,6 +72,7 @@
 
   <script src="shared/core.js?v=11"></script>
   <script src="shared/fx.js?v=11"></script>
+  <script src="shared/town-data.js?v=11"></script>
   <script src="portal.js?v=11"></script>
 </body>
 </html>

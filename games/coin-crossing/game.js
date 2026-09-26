@@ -191,6 +191,32 @@
   function oops() { setPose('oops', 0.7); }
   let quizOpen = false; // a bonus question is waiting for an answer
 
+  // ---------- Wash-to-reveal: the round's town piece hides under mud ----------
+  // The badge gets a spray for progress that says nothing about the money math (from level 3
+  // the game never tells him whether a coin was a good pick): the first time in the round he
+  // makes it safely past each road, and when the castle gate lets him in.
+  let badge = null;
+  let roadsCrossed = new Set();
+  function removeBadge() {
+    if (badge) badge.el.remove();
+    badge = null;
+  }
+  function makeBadge() {
+    removeBadge();
+    roadsCrossed = new Set();
+    if (!MQ.Wash) return;
+    try {
+      badge = MQ.Wash.badge(el('wash-slot'), { data, steps: lanes.length + 1, size: layout === 'wide' ? 58 : 44 });
+    } catch (e) { badge = null; }
+  }
+  const washStep = () => { if (badge) badge.step(); };
+  // After a safe landing on row r: every road below him that he hasn't been past yet this round.
+  function creditRoads(r) {
+    for (const lane of lanes) {
+      if (lane.row > r && !roadsCrossed.has(lane.row)) { roadsCrossed.add(lane.row); washStep(); }
+    }
+  }
+
   function total() { return pouch.reduce((s, c) => s + c.v, 0); }
   // Is the gate open (drawn raised and golden)? Levels 1-2: as soon as the amount is exact.
   // Level 3+: never while he is still collecting, so it can't tell him when he's done.
@@ -215,6 +241,7 @@
     // wrongGate (level 3+) is for this round's stars only; it is not saved.
     stats = { overshoots: 0, bonks: 0, putBacks: 0, wrongGate: 0, seconds: 0 };
     needRevealed = cfg.showNeed;
+    removeBadge();
     buildBoard();
   }
 
@@ -551,6 +578,7 @@
     for (let i = 0; i < 6; i++) {
       particles.push({ x: pos.x + (Math.random() - 0.5) * 20, y: pos.y + 20, vx: (Math.random() - 0.5) * 60, vy: -20 - Math.random() * 30, life: 0.4, color: 'rgba(255,255,255,0.8)', size: 3 + Math.random() * 3, dust: true });
     }
+    creditRoads(player.r);
     if (player.r === BANK_ROW) {
       if (!cfg.judge || total() === target) win();
       else notYet();
@@ -719,6 +747,7 @@
   function win() {
     state = 'won';
     if (cfg.judge) { gateUnlocked = true; MQ.Sound.open(); }
+    washStep(); // the gate let him in
     MQ.Sound.win();
     const { x, y } = cellCenter(0, player.c);
     setPose('happy', 99);
@@ -786,6 +815,7 @@
     showOverlay(`
       <div class="card">
         <h2>Level ${level} complete!</h2>
+        <div class="wash-host"></div>
         <div class="stars-row">${starHtml}</div>
         <div class="praise"><span class="zh">${praise.zh}</span><small>${praise.py} · ${praise.en}</small></div>
         <div class="stats">
@@ -797,12 +827,31 @@
         <div class="next">${move.text}</div>
         ${newHero ? `<div class="next new-hero">🎉 ${MQ.Art.img(newHero.id, 56)} ${MQ.escapeHtml(newHero.name)}!</div>` : ''}
         <div class="press keys-only">Press <span class="key">return</span> for a bonus question ⭐</div>
-        <button class="btn go touch-only" data-go>Bonus question ⭐ ▶</button>
+        <div class="result-btns">
+          <button class="btn go touch-only" data-go>Bonus question ⭐ ▶</button>
+          <a class="btn secondary town-btn" href="../../town/index.html" tabindex="-1">🏡 My Town</a>
+        </div>
       </div>`,
-      (k) => { if (k === 'Enter' || k === ' ') startQuiz(); },
+      (k) => { if (k === 'Enter' || k === ' ') resultContinue(); },
       true
     );
-    onGo(startQuiz);
+    // The town piece: he washes off the mud that's left. Continue is ignored for a moment (so a
+    // held or double press doesn't skip the card); then, if it isn't clean yet, the first press
+    // finishes it with a big splash and the next one moves on.
+    const shownAt = performance.now();
+    let fin = null;
+    try {
+      const small = layout === 'port' || layout === 'land';
+      if (MQ.Wash) fin = MQ.Wash.finale(overlay.querySelector('.wash-host'), { data, badge, size: small ? (layout === 'land' ? 150 : 180) : 230 });
+    } catch (e) { fin = null; }
+    function resultContinue() {
+      if (state !== 'result' || performance.now() - shownAt < 1500) return;
+      if (fin && !fin.clean) { fin.finish(); return; }
+      if (fin) fin.cleanup();
+      startQuiz();
+    }
+    const go = overlay.querySelector('[data-go]');
+    go.addEventListener('click', (e) => { e.preventDefault(); MQ.Sound.click(); resultContinue(); });
     // The stars he just earned fly up to the ⭐ counter.
     overlay.querySelectorAll('.stars-row span:not(.off)').forEach((s, i) => {
       const r = s.getBoundingClientRect();
@@ -1097,6 +1146,7 @@
     hideOverlay();
     state = 'play';
     boardQuietUntil = performance.now() + QUIET_MS;
+    makeBadge();
     MQ.Sound.click();
     say(`Get ${MQ.money(target, targetFmt)}, then 🏰`);
     if (cfg.judge) MQ.Voice.say(`Count your coins. Hop into the castle when you think you have exactly ${MQ.moneyWords(target)}.`, 'en-US', { interrupt: true });

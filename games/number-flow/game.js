@@ -345,6 +345,11 @@
   let hintSeen = [];
   let lastHintAt = -Infinity; // stats.seconds when the last hint was given
   let toldHead = false; // "add them up in your head!" has been spoken this puzzle
+  // Wash-to-reveal: a muddy picture of his next town piece; each pair joined with the right sum
+  // sprays a patch clean (once per pair), and he washes the rest on the result card.
+  let wash = null; // the badge for this round
+  let washed = new Set(); // pairs that have already sprayed the badge
+  let fin = null; // the finale on the result card
   // Running total on show while drawing? (levels 1-2 only — see configFor)
   const live = () => puzzle.cfg.liveSum !== false;
 
@@ -545,6 +550,7 @@
     active = p;
     if (right) {
       drawing = -1;
+      if (wash && !washed.has(p)) { washed.add(p); wash.step(); }
       MQ.Sound.open();
       shimmers.push({ p, t: 0 });
       paths[p].forEach((i, k) => setTimeout(() => { const c = cellCenter(i); burst(c.x, c.y, pr.color.light, 6); }, k * 60));
@@ -1087,6 +1093,7 @@
       <div class="card result">
         <canvas class="card-hero" width="240" height="240" data-pose="happy" aria-hidden="true"></canvas>
         <h2>Solved! 🎉</h2>
+        <div class="wash-host"></div>
         <div class="stars-row">${starHtml}</div>
         <div class="praise"><span class="zh">${praise.zh}</span><small>${praise.py} · ${praise.en}</small></div>
         <div class="sums">${sums}</div>
@@ -1097,12 +1104,33 @@
         </div>
         <div class="next">${moveShort}</div>
         ${newHero ? `<div class="next new-hero">🎉 New: ${MQ.Art.img(newHero.id, 52)} ${MQ.escapeHtml(newHero.name)}!</div>` : ''}
-        <div class="press keys-only">Press <span class="key">return</span> ▶</div>
-        <button class="btn go touch-only" type="button">Next ▶</button>
+        <div class="result-go">
+          <span class="press keys-only">Press <span class="key">return</span> ▶</span>
+          <button class="btn go touch-only" type="button">Next ▶</button>
+          <a class="btn secondary town-btn" href="../../town/index.html" tabindex="-1">🏡 My Town</a>
+        </div>
       </div>`,
-      (k) => { if (k === 'Enter' || k === ' ') nextPuzzle(); }
+      (k) => {
+        if (k !== 'Enter' && k !== ' ') return;
+        // (a keyboard user who tabbed to "My Town" goes there)
+        const town = overlay.querySelector('.town-btn');
+        if (k === 'Enter' && town && document.activeElement === town) { location.href = town.href; return; }
+        resultContinue();
+      }
     );
-    overlay.querySelector('.card').addEventListener('click', armed(nextPuzzle));
+    const card = overlay.querySelector('.card');
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('.mq-wash-pic, .town-btn')) return; // washing / going to the town
+      resultContinue();
+    });
+    overlay.querySelector('.town-btn').addEventListener('click', (e) => e.stopPropagation());
+    fin = null;
+    if (MQ.Wash && wash) {
+      card.classList.add('has-wash');
+      try {
+        fin = MQ.Wash.finale(card.querySelector('.wash-host'), { data, badge: wash, size: !compact ? 230 : root.classList.contains('nf-land') ? 130 : 180 });
+      } catch (e) { fin = null; }
+    }
     // Each star he earned flies from the card to the ⭐ counter, which counts up as they land.
     const counter = el('stars');
     const spans = overlay.querySelectorAll('.stars-row span:not(.off)');
@@ -1116,8 +1144,19 @@
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) counter.textContent = data.stars;
   }
 
+  // Result card: return / tap waits 1.5 s; if the piece isn't washed yet, the first press
+  // finishes it with a big splash and the next one goes on.
+  function resultContinue() {
+    if (state !== 'result' || performance.now() - overlayAt < 1500) return;
+    if (fin && !fin.clean) { fin.finish(); return; }
+    nextPuzzle();
+  }
+
   function nextPuzzle() {
     if (state !== 'result') return;
+    if (fin) { fin.cleanup(); fin = null; }
+    el('wash-slot').innerHTML = '';
+    wash = null;
     newPuzzle();
     showIntro();
   }
@@ -1206,12 +1245,24 @@
     hideOverlay();
     state = 'play';
     MQ.Sound.click();
+    makeBadge();
     const pr = puzzle.pairs[0];
     cursor = pr.a;
     active = 0;
     say(kb(`${pr.color.emoji} ${pr.target}! Press space`, `👆 Drag from ${pr.color.emoji} ${pr.target}!`));
     updateHud();
     if (!live() && !toldHead) { toldHead = true; MQ.Voice.say('Add them up in your head! The total shows at the other dot.', 'en-US'); }
+  }
+
+  function makeBadge() {
+    const slot = el('wash-slot');
+    slot.innerHTML = '';
+    washed = new Set();
+    wash = null;
+    if (!MQ.Wash) return;
+    try {
+      wash = MQ.Wash.badge(slot, { data, steps: puzzle.pairs.length, size: compact ? 44 : 64 });
+    } catch (e) { wash = null; }
   }
 
   function showPause() {

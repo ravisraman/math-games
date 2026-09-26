@@ -502,6 +502,7 @@
     if (data.settings.chinese) MQ.Voice.say(first ? praise.zh : '对了!', 'zh-CN', { interrupt: true });
     else MQ.Voice.say(first ? praise.en : 'You got it!', 'en-US', { interrupt: true });
 
+    if (washBadge) washBadge.step(); // a patch of the hidden town piece gets sprayed clean
     p.done = true;
     p.build = 0;
     floor++;
@@ -636,6 +637,7 @@
     showOverlay(`
       <div class="card result" data-enter>
         <h2>${MQ.Art.img(heroId, 64, 'card-hero')} You reached the top!</h2>
+        <div class="wash-host"></div>
         <div class="stars-row">${starHtml}</div>
         <div class="praise"><span class="zh">${praise.zh}</span><small>${praise.py} · ${praise.en}</small></div>
         <div class="stats">
@@ -646,11 +648,23 @@
         ${practice.length ? `<div class="practice">🔁 <b>${practice.map(MQ.escapeHtml).join(' · ')}</b></div>` : ''}
         <div class="next ${move.kind}">${move.text}</div>
         ${newHero ? `<div class="next new-hero">🎉 New hero: ${MQ.Art.img(newHero.id, 56)} ${MQ.escapeHtml(newHero.name)}!</div>` : ''}
-        <div class="press keys-only">Press <span class="key">return</span></div>
-        <button class="btn go touch-only">▶ Climb again</button>
+        <div class="result-go">
+          <div class="press keys-only">Press <span class="key">return</span></div>
+          <button class="btn go touch-only">▶ Climb again</button>
+          <a class="btn secondary town-btn" href="../../town/index.html">🏡 My Town</a>
+        </div>
       </div>`,
-      (k) => { if (k === 'Enter') { MQ.Sound.click(); newClimb(); showIntro(); } }, true, 1500
+      (k) => {
+        if (k !== 'Enter') return;
+        if (document.activeElement && document.activeElement.classList.contains('town-btn')) return; // the link opens the town
+        // Not washed yet: the first return rinses it all clean with a big splash; the next one climbs again.
+        if (washFin && !washFin.clean) { washFin.finish(); return; }
+        MQ.Sound.click(); endWash(); newClimb(); showIntro();
+      }, true, 1500
     );
+    // A drag on the picture (or a tap on My Town) must not count as a tap on the card.
+    const townBtn = overlay.querySelector('.town-btn');
+    if (townBtn) townBtn.addEventListener('click', (e) => { e.stopPropagation(); persist(); });
     // The stars he earned fly into the ⭐ counter.
     const pill = document.querySelector('.star-pill');
     overlay.querySelectorAll('.stars-row span:not(.off)').forEach((sp, i) => {
@@ -664,6 +678,34 @@
       : move.kind === 'down' ? `${starWord}! Let's practice some easier ones.`
       : `${starWord}! Get 9 right on the first try to level up.`;
     MQ.Voice.say(`${spoken}${newHero ? ' You unlocked a new hero!' : ''}`, 'en-US', { interrupt: false });
+    // The town piece hidden under the mud all climb: he power-washes the rest himself.
+    const host = overlay.querySelector('.wash-host');
+    if (host && washBadge) {
+      washFin = MQ.Wash.finale(host, { data, badge: washBadge, size: layout === 'wide' ? 240 : layout === 'landscape' ? 150 : 180 });
+      washFin.el.addEventListener('click', (e) => e.stopPropagation());
+    } else if (host) host.remove();
+  }
+
+  // ---------- Wash-to-reveal (the next piece for his town) ----------
+  let washBadge = null;
+  let washFin = null;
+  // Laptop: at the top of the floor column. Phone upright: next to ⭐. Phone sideways: in the floor box.
+  function placeWashBadge() {
+    if (!washBadge) return;
+    const box = washBadge.el;
+    const host = layout === 'portrait' ? document.querySelector('.panel-top') : el('wash-slot');
+    if (box.parentNode !== host) host.appendChild(box);
+    const size = layout === 'wide' ? 58 : 44;
+    box.style.width = box.style.height = `${size}px`;
+  }
+  function startWash() {
+    endWash();
+    washBadge = MQ.Wash.badge(el('wash-slot'), { data, steps: FLOORS, size: 58 });
+    placeWashBadge();
+  }
+  function endWash() {
+    if (washFin) { washFin.cleanup(); washFin = null; }
+    if (washBadge) { washBadge.el.remove(); washBadge = null; }
   }
 
   // ---------- Overlays ----------
@@ -720,6 +762,7 @@
 
   function startPlay() {
     hideOverlay();
+    startWash();
     state = 'play';
     MQ.Sound.click();
     announce();
@@ -3726,6 +3769,7 @@
     layout = pickLayout();
     const root = document.documentElement;
     ['wide', 'portrait', 'landscape'].forEach((m) => root.classList.toggle(`lay-${m}`, layout === m));
+    placeWashBadge();
     const dpr = window.devicePixelRatio || 1;
     let cssW;
     let cssH;

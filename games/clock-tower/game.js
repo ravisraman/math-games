@@ -704,6 +704,43 @@
   let pendingStar = 0;  // the window whose ⭐ is still flying to the top bar
   const blocks = MQ.FX.blocks();
 
+  // ---------- Wash-to-reveal: this round's town piece hides under mud ----------
+  // A small muddy picture (laptop: top bar next to ⭐ · phone portrait: HUD strip · phone landscape:
+  // top-right corner of the clock box). Each floor done right sprays a patch clean; he washes the
+  // rest on the result card.
+  let washBadge = null;
+  let washFin = null;
+  let resultAt = 0;
+  const RESULT_GUARD = 1500; // ms: continue on the result card is ignored this long (double presses)
+  function placeWash() {
+    if (!washBadge) return;
+    const b = washBadge.el;
+    const s = mode === 'desk' ? 52 : 40;
+    b.style.width = b.style.height = `${s}px`;
+    b.classList.toggle('ct-wash-float', mode === 'landscape');
+    if (mode === 'desk') {
+      el('topbar').insertBefore(b, el('starpill'));
+      b.style.left = b.style.top = '';
+    } else if (mode === 'portrait') {
+      el('phud').insertBefore(b, el('ppause'));
+      b.style.left = b.style.top = '';
+    } else {
+      stage.insertBefore(b, overlay);
+      b.style.left = `${Math.round(Math.min(LW - s - 6, PL.cx + PL.box / 2 - s - 2))}px`;
+      b.style.top = `${Math.round(PL.cy - PL.box / 2 + 2)}px`;
+    }
+  }
+  function startWash() {
+    endWash();
+    washBadge = MQ.Wash.badge(el('phud'), { data, steps: FLOORS, size: 52 });
+    washBadge.el.classList.add('ct-wash');
+    placeWash();
+  }
+  function endWash() {
+    if (washFin) { washFin.cleanup(); washFin = null; }
+    if (washBadge) { washBadge.el.remove(); washBadge = null; }
+  }
+
   function newRound() {
     cfg = cfgFor(g.level);
     floor = 0;
@@ -868,6 +905,7 @@
     const floorMissedBefore = floorMissed;
     if (!floorMissed) { firstTry++; starWindows.push(floor + 1); pendingStar = floor + 1; }
     floor++;
+    if (washBadge) washBadge.step(); // a floor done right (first try or not) sprays a patch clean
     floorMissed = false;
     climbTo(floor);
     const praise = MQ.pick(MQ.PRAISE);
@@ -1062,6 +1100,7 @@
     showOverlay(`
       <div class="card">
         <h2>${MQ.Art.img(heroId, 64, 'card-hero')} 🔔 Level ${level}</h2>
+        <div class="wash-host" id="washhost"></div>
         <div class="stars-row">${starHtml}</div>
         <div class="praise"><span class="zh">${praise.zh}</span><small>${praise.py} · ${praise.en}</small></div>
         <div class="stats">
@@ -1074,16 +1113,30 @@
         ${newHero ? `<div class="next new-hero">🎉 ${MQ.Art.img(newHero.id, 60)} ${MQ.escapeHtml(newHero.name)}</div>` : ''}
         <div class="btn-row">
           <button class="btn start" id="again">Again ▶</button>
+          <a class="btn secondary town-link" href="../../town/index.html">🏡 My Town</a>
           <a class="btn secondary home-link phone-only" href="../../index.html">🏠 Portal</a>
         </div>
         <div class="press keys-only">Press <span class="key">return</span></div>
       </div>`,
-      (k) => { if (k === 'Enter' || k === ' ') nextRound(); else if (k === 'Escape') goHome(); }
+      (k) => { if (k === 'Enter' || k === ' ') resultContinue(); else if (k === 'Escape') goHome(); }
     );
-    el('again').addEventListener('click', nextRound);
+    el('again').addEventListener('click', resultContinue);
+    resultAt = performance.now();
+    // The finale: he power-washes the rest of the mud off this round's town piece.
+    const washSize = mode === 'desk' ? 240 : mode === 'portrait' ? 180 : Math.max(110, Math.min(160, Math.round(LH * 0.32)));
+    if (washBadge) washFin = MQ.Wash.finale(el('washhost'), { data, badge: washBadge, size: washSize });
+  }
+
+  // Result card: return / space / Again. Ignored for a moment (double presses); if the picture is
+  // still muddy the first press rinses it clean with a splash, the next one goes on.
+  function resultContinue() {
+    if (state !== 'result' || performance.now() - resultAt < RESULT_GUARD) return;
+    if (washFin && !washFin.clean) { washFin.finish(); return; }
+    nextRound();
   }
 
   function nextRound() {
+    endWash();
     newRound();
     showIntro();
   }
@@ -1393,6 +1446,7 @@
 
   function startPlay() {
     hideOverlay();
+    startWash();
     state = 'play';
     MQ.Sound.click();
     nextQuestion();
@@ -3229,6 +3283,7 @@
       pixelScale = (cw * dpr) / LW;
       ctx.setTransform(pixelScale, 0, 0, pixelScale, 0, 0);
       deskLayout(cw / LW);
+      placeWash();
       return;
     }
     // Phones: the original board geometry, placed with transforms (see computeLayout).
@@ -3250,6 +3305,7 @@
     hud.style.left = `${PL.hud.left}px`;
     hud.style.width = `${PL.hud.width}px`;
     hud.style.right = 'auto';
+    placeWash();
   }
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', () => { resize(); setTimeout(resize, 250); });
