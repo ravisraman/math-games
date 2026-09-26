@@ -374,3 +374,4 @@ html.lay-landscape .card .wash-host { margin: 0; }
 html.lay-landscape .card .mq-wash-say { font-size: 18px; }
 html.lay-landscape .card.result .result-go { margin-top: 6px; }
 html.lay-landscape .card .town-btn { font-size: 16px; padding: 8px 14px; }
+html.lay-wide .card.result { max-height: 100%; overflow-y: auto; }

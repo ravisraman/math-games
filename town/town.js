@@ -934,6 +934,8 @@ cursor.x = -1; cursor.z = 1;
 {
   const first = tray.find((t) => t.kind === 'earned' && leftOf(t.id) > 0) || tray.find((t) => t.kind === 'free');
   if (first) select(first.id, { sound: false, scroll: false });
+  const el = sel && $('tray-list').querySelector(`[data-id="${sel}"]`);
+  if (el) { const list = $('tray-list'); list.scrollLeft = Math.max(0, el.offsetLeft - list.clientWidth / 2 + el.offsetWidth / 2); }
 }
 
 if (webglOK()) {
@@ -1074,10 +1076,11 @@ window.addEventListener('pointermove', (e) => {
     const g = over && gl.groundAt(e.clientX, e.clientY - (e.pointerType === 'touch' ? 40 : 0));
     if (g) {
       const s = BY_ID.get(dragging.id).size;
-      const a = gl.anchorAtPoint(g, s);
+      const a = clampAnchor(gl.anchorAtPoint(g, s), s);
       cursor.x = a.x; cursor.z = a.z;
-      gl.setCursorOn(true);
-    } else gl.setCursorOn(false);
+      dragging.ok = inGrid(Math.floor(g.x), Math.floor(g.z));
+      gl.setCursorOn(dragging.ok);
+    } else { dragging.ok = false; gl.setCursorOn(false); }
   }
 }, { passive: false });
 function endTrayDrag(e) {
@@ -1087,7 +1090,7 @@ function endTrayDrag(e) {
   const d = dragging; dragging = null;
   d.img.remove();
   const sr = stage.getBoundingClientRect();
-  if (e.type === 'pointerup' && e.clientY < sr.bottom && gl && inGrid(cursor.x, cursor.z)) {
+  if (e.type === 'pointerup' && d.ok && e.clientY < sr.bottom && gl) {
     const s = BY_ID.get(d.id).size;
     placeAt(Math.max(X0, Math.min(X0 + GW - s, cursor.x)), Math.max(Z0, Math.min(Z0 + GH - s, cursor.z)));
   }
@@ -1095,6 +1098,8 @@ function endTrayDrag(e) {
 }
 window.addEventListener('pointerup', endTrayDrag);
 window.addEventListener('pointercancel', endTrayDrag);
+
+const clampAnchor = (a, s) => ({ x: Math.max(X0, Math.min(X0 + GW - s, a.x)), z: Math.max(Z0, Math.min(Z0 + GH - s, a.z)) });
 
 // ---------------- Stage: tap tiles and pieces, drag to look around, pinch / wheel to zoom ----------------
 const pointers = new Map();
@@ -1116,16 +1121,8 @@ stage.addEventListener('pointermove', (e) => {
     // Mouse hovering: the glowing square follows it.
     if (e.pointerType === 'mouse' && e.target === gl.canvas && !dragging) {
       lastInput = 'mouse';
-      const g = gl.groundAt(e.clientX, e.clientY);
-      const p = gl.pieceAt(e.clientX, e.clientY);
-      stage.classList.toggle('hovering', !!p);
-      if (!picked && g) {
-        let a;
-        if (p) a = { x: p.x, z: p.z };
-        else a = gl.anchorAtPoint(g, sel ? BY_ID.get(sel).size : 1);
-        if (a.x !== cursor.x || a.z !== cursor.z || !inGrid(cursor.x, cursor.z)) { cursor.x = a.x; cursor.z = a.z; }
-        gl.setCursorOn(inGrid(Math.floor(g.x), Math.floor(g.z)));
-      }
+      if (!hoverAt) requestAnimationFrame(hover);
+      hoverAt = { x: e.clientX, y: e.clientY };
     }
     return;
   }
@@ -1144,6 +1141,19 @@ stage.addEventListener('pointermove', (e) => {
     gesture.lx = e.clientX; gesture.ly = e.clientY;
   }
 });
+// Mouse hovering: the glowing square follows it (once per frame).
+let hoverAt = null;
+function hover() {
+  const h = hoverAt; hoverAt = null;
+  if (!h || dragging || pointers.size) return;
+  const g = gl.groundAt(h.x, h.y);
+  const p = gl.pieceAt(h.x, h.y);
+  stage.classList.toggle('hovering', !!p);
+  if (picked || !g) return;
+  const a = p ? { x: p.x, z: p.z } : clampAnchor(gl.anchorAtPoint(g, sel ? BY_ID.get(sel).size : 1), sel ? BY_ID.get(sel).size : 1);
+  cursor.x = a.x; cursor.z = a.z;
+  gl.setCursorOn(inGrid(Math.floor(g.x), Math.floor(g.z)));
+}
 function stageUp(e) {
   if (!pointers.has(e.pointerId)) return;
   pointers.delete(e.pointerId);

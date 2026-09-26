@@ -1123,8 +1123,11 @@
     el('again').addEventListener('click', resultContinue);
     resultAt = performance.now();
     // The finale: he power-washes the rest of the mud off this round's town piece.
-    const washSize = mode === 'desk' ? 240 : mode === 'portrait' ? 180 : Math.max(110, Math.min(160, Math.round(LH * 0.32)));
-    if (washBadge) washFin = MQ.Wash.finale(el('washhost'), { data, badge: washBadge, size: washSize });
+    const washSize = mode === 'desk' ? 240 : mode === 'portrait' ? 180 : Math.max(120, Math.min(200, Math.round(LH * 0.5)));
+    if (washBadge) {
+      washFin = MQ.Wash.finale(el('washhost'), { data, badge: washBadge, size: washSize });
+      overlay.querySelector('.card').classList.add('has-wash'); // landscape phones: the picture sits beside the rest
+    }
   }
 
   // Result card: return / space / Again. Ignored for a moment (double presses); if the picture is

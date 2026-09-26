@@ -681,8 +681,12 @@
     // The town piece hidden under the mud all climb: he power-washes the rest himself.
     const host = overlay.querySelector('.wash-host');
     if (host && washBadge) {
-      washFin = MQ.Wash.finale(host, { data, badge: washBadge, size: layout === 'wide' ? 240 : layout === 'landscape' ? 150 : 180 });
+      const size = layout === 'wide' ? Math.round(clamp(window.innerHeight - 590, 170, 240)) : layout === 'landscape' ? 150 : 180;
+      const badge = washBadge;
+      washFin = MQ.Wash.finale(host, { data, badge, size });
       washFin.el.addEventListener('click', (e) => e.stopPropagation());
+      // Once it's his, the little picture in the HUD is clean too.
+      washFin.done.then(() => { const c = badge.canvas; c.getContext('2d').clearRect(0, 0, c.width, c.height); const q = badge.el.querySelector('.mq-wash-q'); if (q) q.remove(); });
     } else if (host) host.remove();
   }
 

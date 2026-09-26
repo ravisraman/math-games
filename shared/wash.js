@@ -88,22 +88,29 @@
       paintMud(ctx, cv.width, cv.height, (MQ.TOWN.roundsDone(data) + 3) * 97);
       let done = 0;
       const spots = [];
-      // Clean in a pleasant order: patches spread over the picture.
-      for (let i = 0; i < steps; i++) spots.push({ x: (0.2 + ((i * 0.618) % 1) * 0.6) * cv.width, y: (0.2 + ((i * 0.382 + 0.3) % 1) * 0.6) * cv.height });
+      // Patches cover the whole picture (a jittered grid in a shuffled order), so by the end
+      // of the round about three quarters is clean and the rest is his to wash.
+      const N = Math.max(steps, Math.round(steps / 0.72)); // about 3 in 4 cells get washed
+      const cols = Math.ceil(Math.sqrt(N)), rows = Math.ceil(N / cols);
+      const cells = [];
+      for (let yy = 0; yy < rows; yy++) for (let xx = 0; xx < cols; xx++) cells.push({ x: (xx + 0.3 + Math.random() * 0.4) / cols * cv.width, y: (yy + 0.3 + Math.random() * 0.4) / rows * cv.height });
+      for (let i = cells.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [cells[i], cells[j]] = [cells[j], cells[i]]; }
+      spots.push(...cells.slice(0, steps));
+      const patch = Math.max(cv.width / cols, cv.height / rows) * 0.66;
       return {
         piece,
         el: box,
         step() {
           if (done >= steps) return;
           const sp = spots[done++];
-          const r = cv.width * (0.26 + 0.06 * Math.random());
+          const r = patch * (0.95 + 0.15 * Math.random());
           if (reduce()) { wipe(ctx, sp.x, sp.y, r); return; }
           // a quick spray animation: several wipes along a short stroke
           const n = 8; let k = 0;
           const a = Math.random() * Math.PI;
           const tick = () => {
             const t = k / n;
-            wipe(ctx, sp.x + Math.cos(a) * (t - 0.5) * r, sp.y + Math.sin(a) * (t - 0.5) * r, r * 0.55);
+            wipe(ctx, sp.x + Math.cos(a) * (t - 0.5) * r, sp.y + Math.sin(a) * (t - 0.5) * r, r * 0.85);
             if (++k <= n) requestAnimationFrame(tick);
           };
           tick();
