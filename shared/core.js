@@ -1546,19 +1546,19 @@
     const j = Math.floor((c % 100) / 10);
     const f = c % 10;
     let s = (y === 2 ? '两' : zhNumber(y)) + '元'; // 两元, as people say it
-    if (j) s += DIGITS[j] + '角';
+    if (j) s += (j === 2 ? '两' : DIGITS[j]) + '角'; // 两角, as people say it
     else if (f) s += '零';
     if (f) s += DIGITS[f] + '分';
     return s;
   }
 
   const PRAISE = [
-    { zh: '太棒了!', py: 'tài bàng le', en: 'Awesome!' },
-    { zh: '真厉害!', py: 'zhēn lìhai', en: 'So good!' },
-    { zh: '好极了!', py: 'hǎo jí le', en: 'Excellent!' },
-    { zh: '你真棒!', py: 'nǐ zhēn bàng', en: "You're great!" },
+    { zh: '太棒了！', py: 'tài bàng le', en: 'Awesome!' },
+    { zh: '真厉害！', py: 'zhēn lìhai', en: 'So good!' },
+    { zh: '好极了！', py: 'hǎo jí le', en: 'Excellent!' },
+    { zh: '你真棒！', py: 'nǐ zhēn bàng', en: "You're great!" },
   ];
-  const CHEER = { zh: '加油!', py: 'jiāyóu', en: 'You can do it!' };
+  const CHEER = { zh: '加油！', py: 'jiāyóu', en: 'You can do it!' };
 
   function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
