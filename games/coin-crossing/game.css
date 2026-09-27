@@ -162,6 +162,12 @@ body {
 .explain { font-size: 18px; margin-top: 12px; font-weight: 700; }
 .explain.good { color: var(--good); }
 .explain.bad { color: #b23b37; }
+.explain.try { color: #b3471a; }
+.explain .how { display: block; margin-top: 4px; font-weight: 600; color: var(--ink); }
+/* A wrong first pick stays greyed out while he tries once more (nothing else is marked). */
+.choice.tried { opacity: 0.5; }
+.choices.waiting .choice.tried { animation: wobble 0.45s ease-out; }
+@media (prefers-reduced-motion: reduce) { .choices.waiting .choice.tried { animation: none; } }
 
 .menu { display: grid; gap: 10px; margin-top: 14px; }
 .menu .btn.sel { outline: 4px solid var(--sky); outline-offset: 3px; }

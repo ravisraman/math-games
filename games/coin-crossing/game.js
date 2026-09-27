@@ -867,12 +867,142 @@
     ['🎈', 'balloon'], ['🥟', 'dumpling'], ['🍡', 'snack'], ['🧸', 'teddy bear'], ['⚽', 'ball'],
   ];
 
-  function numberOptions(ans, fmt = (n) => String(n)) {
-    const set = new Set([ans]);
-    const tries = [ans + 1, ans - 1, ans + 10, ans - 10, ans + 5, ans - 5, ans + 2, ans - 2];
-    shuffle(tries);
-    for (const t of tries) { if (set.size >= 3) break; if (t > 0) set.add(t); }
-    return shuffle([...set]).map(fmt);
+  // ---------- Answer choices built from real mistakes ----------
+  // Every bonus question shows the answer and two mistakes children really make (off by 1,
+  // off by 10, forgot to regroup, digits swapped, $3.18 vs $31.80 vs $0.18 ...). So that no
+  // trick beats the math ("pick the middle one", "pick the one close to both others"),
+  // number choices are made as a little SHAPE of slips (like 38 · 39 · 48) and the answer is
+  // put at a random spot in the shape: usually both wrong choices are one slip from the
+  // answer, sometimes one of them is a slip away from the other wrong one instead.
+  // `slips` is a list of [offset, weight].
+  function drawWeighted(list) {
+    let x = Math.random() * list.reduce((s, it) => s + it[1], 0);
+    for (const it of list) { x -= it[1]; if (x <= 0) return it; }
+    return list[list.length - 1];
+  }
+  function shapeChoices(ans, slips, ok = (v) => v > 0) {
+    // The answer's rank is picked first, so small answers (where "10 less" can't be shown)
+    // are not always the smallest choice.
+    for (const r of shuffle([0, 1, 2])) {
+      for (let tries = 0; tries < 60; tries++) {
+        const a = drawWeighted(slips)[0];
+        const b = drawWeighted(slips)[0];
+        if (!a || !b || a === b) continue;
+        const shape = [0, a, b].sort((x, y) => x - y);
+        const at = shape[r]; // where the answer sits in the shape
+        const vals = shape.map((s) => ans + s - at);
+        if (new Set(vals).size === 3 && vals.every(ok)) return shuffle(vals);
+      }
+    }
+    return shuffle([ans, ans + 1, ans + 2]); // (not reached with the slips below)
+  }
+  // Money written wrong: slips that can be undone (swapped cents digits, a dollar off) make
+  // a shape the same way; place-value mistakes ($31.80, $0.18) can't, so for those the answer's
+  // rank is picked first. Half the questions use each.
+  function moneyChoices(c, placeValue) {
+    const d = Math.floor(c / 100);
+    const r = c % 100;
+    const swap = (v) => Math.floor(v / 100) * 100 + (v % 10) * 10 + Math.floor((v % 100) / 10);
+    const moves = [[swap, swap], [(v) => v + 100, (v) => v - 100], [(v) => v - 100, (v) => v + 100]];
+    if (Math.random() < 0.5) {
+      for (let tries = 0; tries < 30; tries++) {
+        const [m1, m2] = shuffle([...moves]).slice(0, 2);
+        const at = rand(0, 2);
+        const x = at === 0 ? c : at === 1 ? m1[1](c) : m2[1](c);
+        const vals = [x, m1[0](x), m2[0](x)];
+        if (new Set(vals).size === 3 && vals.includes(c) && vals.every((v) => v >= 100 && v < 1000)) return shuffle(vals);
+      }
+    }
+    return rankChoices(c, [...placeValue, [swap(c), 3], [c + 100, 1], [d >= 2 ? c - 100 : 0, 1], [r ? d * 100 : 0, 1]]);
+  }
+  // Mistakes that are not a fixed offset ($31.80 for $3.18): `cands` is a list of
+  // [value, weight]. The answer's rank (smallest / middle / largest) is picked at random first,
+  // then two mistakes that fit that rank.
+  function rankChoices(ans, cands) {
+    const seen = new Set([ans]);
+    const pool = cands.filter(([v, w]) => w > 0 && v > 0 && !seen.has(v) && seen.add(v));
+    const lo = pool.filter((c) => c[0] < ans);
+    const hi = pool.filter((c) => c[0] > ans);
+    const ranks = [];
+    if (hi.length >= 2) ranks.push(0);
+    if (lo.length && hi.length) ranks.push(1);
+    if (lo.length >= 2) ranks.push(2);
+    const take = (arr) => { const it = drawWeighted(arr); arr.splice(arr.indexOf(it), 1); return it[0]; };
+    const r = pick(ranks);
+    const two = r === 0 ? [take(hi), take(hi)] : r === 2 ? [take(lo), take(lo)] : [take(lo), take(hi)];
+    return shuffle([ans, ...two]);
+  }
+
+  // ---------- Short "how to think about it" lines ----------
+  // `hint` is shown after a first wrong try (it never gives the answer away); `how` is the
+  // strategy shown with the answer.
+  function addHelp(nums, ans) {
+    if (nums.length === 3) {
+      // Add two first, a pair that makes a ten if there is one.
+      let pair = [0, 1];
+      for (const [i, j] of [[0, 1], [0, 2], [1, 2]]) if ((nums[i] + nums[j]) % 10 === 0) { pair = [i, j]; break; }
+      const [x, y] = [nums[pair[0]], nums[pair[1]]];
+      const z = nums[3 - pair[0] - pair[1]];
+      const s = x + y;
+      const first = s % 10 === 0 ? `Make ${s} first: ${x} + ${y} = ${s}.` : `Add two first: ${x} + ${y} = ${s}.`;
+      return { hint: `${first} Then add ${z}.`, how: `${first} ${s} + ${z} = ${ans}.` };
+    }
+    const big = Math.max(...nums);
+    const small = Math.min(...nums);
+    if (big <= 10) {
+      if (ans <= 10 || small <= 3) {
+        const run = Array.from({ length: small }, (_, i) => big + i + 1).join(', ');
+        return { hint: `Start at ${big} and count on ${small}.`, how: `Start at ${big}, count on: ${run}.` };
+      }
+      const need = 10 - big;
+      return { hint: `Make 10 first: ${big} + ${need} = 10.`, how: `${big} + ${need} = 10, and ${small - need} more is ${ans}.` };
+    }
+    if (small < 10) {
+      const up = Math.ceil((big + 1) / 10) * 10;
+      const need = up - big;
+      if (small > need) return { hint: `Get to ${up} first: ${big} + ${need} = ${up}.`, how: `${big} + ${need} = ${up}, and ${small - need} more is ${ans}.` };
+      return { hint: `Add the ones: ${big % 10} + ${small}.`, how: `Ones: ${big % 10} + ${small} = ${big % 10 + small}, so ${ans}.` };
+    }
+    const [x, y] = nums;
+    const T = (x - (x % 10)) + (y - (y % 10));
+    const O = (x % 10) + (y % 10);
+    return {
+      hint: `Tens first: ${x - (x % 10)} + ${y - (y % 10)} = ${T}. Then the ones.`,
+      how: `Tens: ${x - (x % 10)} + ${y - (y % 10)} = ${T}. Ones: ${x % 10} + ${y % 10} = ${O}. ${T} + ${O} = ${ans}.`,
+    };
+  }
+  function subHelp(a, b, ans) {
+    if (b <= 3) {
+      const run = Array.from({ length: b }, (_, i) => a - i - 1).join(', ');
+      return { hint: `Count back ${b} from ${a}.`, how: `Count back from ${a}: ${run}.` };
+    }
+    if (a <= 20) return { hint: `Think: ${b} + ? = ${a}`, how: `${b} + ${ans} = ${a}, so ${a} − ${b} = ${ans}.` };
+    if (b < 10) {
+      const o = a % 10;
+      if (o >= b) return { hint: `Ones first: ${o} − ${b}.`, how: `Ones: ${o} − ${b} = ${o - b}, so ${ans}.` };
+      return { hint: `Back to ${a - o} first: ${a} − ${o} = ${a - o}.`, how: `${a} − ${o} = ${a - o}, then ${b - o} more back is ${ans}.` };
+    }
+    const tens = b - (b % 10);
+    if (b % 10 === 0) return { hint: `Take away ${tens / 10} ten${tens > 10 ? 's' : ''} from ${a}.`, how: `${a} − ${tens} = ${ans}: the ones stay the same.` };
+    return {
+      hint: `Tens first: ${a} − ${tens} = ${a - tens}. Then take away ${b % 10}.`,
+      how: `${a} − ${tens} = ${a - tens}, then ${a - tens} − ${b % 10} = ${ans}.`,
+    };
+  }
+  // Counting up from the price to what he has (the way a shopkeeper gives change).
+  function countUp(price, have, fmt) {
+    const m = (c) => MQ.money(c, fmt);
+    // Next ten, then the next 50¢ (or dollar), then what he has: 24¢ → 30¢ → 50¢ → 75¢.
+    const stops = [...new Set([Math.ceil(price / 10) * 10, have <= 100 ? Math.ceil(price / 50) * 50 : Math.ceil(price / 100) * 100, have])]
+      .filter((s) => s > price && s <= have).sort((x, y) => x - y);
+    let at = price;
+    const steps = stops.map((s) => { const d = s - at; at = s; return `${m(s)} is ${m(d)} more`; });
+    const parts = stops.map((s, i) => s - (i ? stops[i - 1] : price));
+    const sum = parts.length > 1 ? ` ${parts.map(m).join(' + ')} = ${m(have - price)}.` : '';
+    return {
+      hint: `Count up from ${m(price)} to ${m(have)}. ${steps[0]} …`,
+      how: `Count up from ${m(price)}: ${steps.join(', ')}.${sum}`,
+    };
   }
 
   const QUIZ = {
@@ -885,10 +1015,16 @@
         else if (L <= 7) nums = Math.random() < 0.5 ? [rand(11, 49), rand(11, 49)] : [pick([10, 20, 25]), pick([5, 10, 15]), rand(2, 9)];
         else nums = Math.random() < 0.5 ? [rand(15, 65), rand(15, 35)] : [rand(10, 40), rand(10, 30), rand(5, 25)];
         const ans = nums.reduce((a, b) => a + b, 0);
+        // Slips: counting off by 1 or 2, off by 10 (forgot to carry the ten / carried one too
+        // many), and with three numbers, leaving one out.
+        const regroup = ans >= 10 && nums.reduce((s, n) => s + (n % 10), 0) >= 10;
+        const slips = [[1, 3], [-1, 3], [2, 1], [-2, 1], [10, 2], [-10, regroup ? 4 : 2]];
+        if (nums.length === 3) slips.push([-nums[2], 1], [nums[2], 1]);
+        const help = addHelp(nums, ans);
         return {
           q: `${nums.join(' + ')} = ?`, speak: `What is ${nums.join(' plus ')}?`,
-          answer: String(ans), options: numberOptions(ans),
-          explain: `${nums.join(' + ')} = ${ans}`,
+          answer: String(ans), options: shapeChoices(ans, slips).map(String),
+          hint: help.hint, explain: `${nums.join(' + ')} = ${ans}. ${help.how}`,
         };
       },
     },
@@ -899,14 +1035,21 @@
         const n = L <= 2 ? rand(2, 3) : L <= 5 ? rand(3, 4) : rand(4, 6);
         const vals = Array.from({ length: n }, () => pick(denoms)).sort((a, b) => b - a);
         const ans = vals.reduce((a, b) => a + b, 0);
-        const opts = new Set([ans]);
-        if (n !== ans) opts.add(n); // classic mistake: counting coins instead of their value
+        // Slips: a penny, nickel or dime too many or too few; a nickel counted as a penny; a
+        // quarter counted as a dime. Counting the coins instead of the money (4 coins → 4¢) is
+        // a classic, but only offered when it is close enough not to stand out.
+        const slips = [[1, 2], [-1, 2], [5, 2], [-5, 2], [10, 2], [-10, 2]];
+        if (vals.includes(5) && vals.includes(1)) slips.push([-4, 1]);
+        if (vals.includes(25)) slips.push([-15, 1]);
+        if (n !== ans && Math.abs(ans - n) <= Math.max(4, ans / 4)) slips.push([n - ans, 4]);
+        const run = vals.map((v, i) => vals.slice(0, i + 1).reduce((a, b) => a + b, 0));
         return {
           q: 'How much money is this?', speak: 'How much money is this?',
           visual: vals.map((v) => coinChip(v, true)).join(''),
           answer: `${ans}¢`,
-          options: shuffle([...new Set([...opts, ...numberOptions(ans).map(Number)])].slice(0, 3)).map((x) => `${x}¢`),
-          explain: `${vals.map((v) => `${v}¢`).join(' + ')} = ${ans}¢`,
+          options: shapeChoices(ans, slips).map((x) => `${x}¢`),
+          hint: `Start with the biggest coin, ${vals[0]}¢, and count on.`,
+          explain: `Biggest first: ${run.join(', ')}. That's ${ans}¢.`,
         };
       },
     },
@@ -918,9 +1061,18 @@
         else if (L <= 6) { a = rand(20, 60); b = rand(3, a - 5); }
         else { a = rand(40, 99); b = rand(11, a - 8); }
         const ans = a - b;
+        // Slips: off by 1 or 2, off by 10, and "smaller from larger" when a ten must be broken
+        // (52 − 27 → 35, 13 − 5 → 12).
+        const slips = [[1, 3], [-1, 3], [2, 1], [-2, 1], [10, 2], [-10, 2]];
+        if (a >= 10 && a % 10 < b % 10) {
+          const sfl = (Math.floor(a / 10) - Math.floor(b / 10)) * 10 + (b % 10 - a % 10);
+          if (sfl > 0 && sfl !== ans) slips.push([sfl - ans, 4]);
+        }
+        const help = subHelp(a, b, ans);
         return {
           q: `${a} − ${b} = ?`, speak: `What is ${a} minus ${b}?`,
-          answer: String(ans), options: numberOptions(ans), explain: `${a} − ${b} = ${ans}`,
+          answer: String(ans), options: shapeChoices(ans, slips, (v) => v >= 0).map(String),
+          hint: help.hint, explain: `${a} − ${b} = ${ans}. ${help.how}`,
         };
       },
     },
@@ -935,12 +1087,18 @@
         price = Math.min(price, have - 1);
         const fmt = have >= 100 && L >= 8 ? 'dollars' : 'cents';
         const ans = have - price;
+        // Slips: counting up by 1, 5 or 10 too far or not far enough; 100 − 37 → 73 (the ten
+        // that was never broken); and on bigger bills a dollar off.
+        const slips = [[1, 2], [-1, 2], [5, 2], [-5, 2], [10, price % 10 ? 3 : 2], [-10, 2]];
+        if (have >= 200) slips.push([100, 2], [-100, 2]);
+        const help = countUp(price, have, fmt);
         return {
           q: `You have ${MQ.money(have, fmt)}. ${emoji} costs ${MQ.money(price, fmt)}. How much is left?`,
           speak: `You have ${MQ.moneyWords(have)}. The ${name} costs ${MQ.moneyWords(price)}. How much money is left?`,
           visual: emoji,
-          answer: MQ.money(ans, fmt), options: numberOptions(ans).map((n) => MQ.money(Number(n), fmt)),
-          explain: `${MQ.money(have, fmt)} − ${MQ.money(price, fmt)} = ${MQ.money(ans, fmt)}`,
+          answer: MQ.money(ans, fmt),
+          options: shapeChoices(ans, slips, (v) => v > 0 && v < have).map((v) => MQ.money(v, fmt)),
+          hint: help.hint, explain: help.how,
         };
       },
     },
@@ -948,12 +1106,20 @@
       label: 'Cents → dollars', min: 7,
       make() {
         const c = Math.random() < 0.3 ? rand(1, 9) * 100 + rand(1, 9) : rand(101, 999);
-        const wrong = [`$${Math.floor(c / 10)}.${c % 10}0`, `$0.${String(c % 100).padStart(2, '0')}`, `$${Math.floor(c / 100)}.${(c % 100) % 10}${Math.floor((c % 100) / 10)}`];
+        const d = Math.floor(c / 100);
+        const r = c % 100;
+        const cands = [
+          [c * 10, 2], // $31.80: the point in the wrong place
+          [c * 100, 1], // $318.00: cents written as dollars
+          [r, 2], // $0.18: lost the dollars
+          [(r % 10) * 10 + Math.floor(r / 10), 1], // $0.81
+        ];
         return {
           q: `${c}¢ = ?`, speak: `How do you write ${c} cents with a dollar sign?`,
           answer: MQ.dollars(c),
-          options: shuffle([...new Set([MQ.dollars(c), ...wrong])].slice(0, 3)),
-          explain: `100¢ = $1.00, so ${c}¢ = ${MQ.dollars(c)}`,
+          options: moneyChoices(c, cands).map(MQ.dollars),
+          hint: `100¢ = $1.00, so ${d * 100}¢ = ${MQ.dollars(d * 100)}.`,
+          explain: `100¢ = $1.00. ${c}¢ = ${d * 100}¢ + ${r}¢ = ${MQ.dollars(c)}.`,
         };
       },
     },
@@ -963,12 +1129,18 @@
         const c = Math.random() < 0.3 ? rand(1, 9) * 100 + rand(1, 9) : rand(101, 999);
         const d = Math.floor(c / 100);
         const r = c % 100;
-        const wrong = [`${d}${r}¢`, `${c * 10}¢`, `${r}¢`];
+        const cands = [
+          [c * 10, 2], // 3180¢
+          [r, 2], // 18¢: lost the dollars
+          [d + r, 2], // 21¢: added 3 and 18
+          [r < 10 ? d * 10 + r : 0, 3], // 35¢ for $3.05: dropped the zero
+        ];
         return {
           q: `${MQ.dollars(c)} = ? ¢`, speak: `How many cents is ${MQ.moneyWords(c)}?`,
           answer: `${c}¢`,
-          options: shuffle([...new Set([`${c}¢`, ...wrong])].slice(0, 3)),
-          explain: `$1.00 = 100¢, so ${MQ.dollars(c)} = ${c}¢`,
+          options: moneyChoices(c, cands).map((v) => `${v}¢`),
+          hint: `$1.00 = 100¢, so ${MQ.dollars(d * 100)} = ${d * 100}¢.`,
+          explain: `$1.00 = 100¢. ${MQ.dollars(c)} = ${d * 100}¢ + ${r}¢ = ${c}¢.`,
         };
       },
     },
@@ -993,27 +1165,35 @@
     const type = chooseQuizType();
     const q = QUIZ[type].make(Math.max(1, g.level - 1));
     if (!q.options.includes(q.answer)) q.options[0] = q.answer;
-    while (q.options.length < 3) q.options.push(String(Number(q.options[q.options.length - 1]) + 2));
     // Nothing is pre-selected: every choice looks the same until the child picks one
     // (no "leading the witness"). The first arrow press picks from the middle outwards.
+    // A wrong first pick gets ONE more try (with a hint that doesn't give the answer away);
+    // the bonus star is only for a right first pick.
     let sel = -1;
     let done = false;
     let nudge = false;
+    let phase = 'ask'; // ask | retry | right | right2 | wrong
+    const tried = new Set(); // wrong picks (greyed out for the second try)
+    const free = (i) => i >= 0 && i < q.options.length && !tried.has(i);
 
     let first = true;
-    const render = (result) => {
+    const render = () => {
+      const result = done ? phase : null;
       const choices = q.options.map((o, i) => {
         let cls = 'choice';
-        if (result) { if (o === q.answer) cls += ' right'; else if (i === sel) cls += ' wrong'; }
+        if (result) { if (o === q.answer) cls += ' right'; else if (tried.has(i)) cls += ' wrong'; }
+        else if (tried.has(i)) cls += ' wrong tried';
         else if (i === sel) cls += ' sel';
-        return `<button class="${cls}" data-i="${i}">${MQ.escapeHtml(o)}</button>`;
+        return `<button class="${cls}" data-i="${i}"${!result && tried.has(i) ? ' disabled' : ''}>${MQ.escapeHtml(o)}</button>`;
       }).join('');
       const keyHint = result ? 'Press <span class="key">return</span> to keep going'
         : sel < 0 ? `<span class="${nudge ? 'nudge' : ''}">${nudge ? 'Pick an answer first — use' : 'Pick one! Use'} <span class="key">←</span> <span class="key">→</span></span>`
         : 'Pick with <span class="key">←</span> <span class="key">→</span> then press <span class="key">return</span>';
-      const feedback = !result ? '' : result === 'right'
-        ? `<div class="explain good">✔ Correct! <span class="zh">对了!</span> +1 ⭐</div>`
-        : `<div class="explain bad">The answer is ${MQ.escapeHtml(q.answer)}. ${MQ.escapeHtml(q.explain)}</div>`;
+      let feedback = '';
+      if (phase === 'retry') feedback = `<div class="explain try">Not quite. Try again! <span class="how">💡 ${MQ.escapeHtml(q.hint)}</span></div>`;
+      else if (phase === 'right') feedback = `<div class="explain good">✔ Correct! <span class="zh">对了!</span> +1 ⭐</div>`;
+      else if (phase === 'right2') feedback = `<div class="explain good">✔ That's it! <span class="zh">对了!</span> <span class="how">${MQ.escapeHtml(q.explain)}</span></div>`;
+      else if (phase === 'wrong') feedback = `<div class="explain bad">The answer is ${MQ.escapeHtml(q.answer)}. <span class="how">${MQ.escapeHtml(q.explain)}</span></div>`;
       showOverlay(`
         <div class="card quiz-card">
           <div class="hint">⭐ Bonus · ${QUIZ[type].label}</div>
@@ -1027,23 +1207,47 @@
       first = false;
       overlay.querySelectorAll('.choice').forEach((b) => b.addEventListener('click', () => {
         if (done) { if (!MQ.isTouch) nextLevel(); return; } // on touch, the Next button moves on (no accidental double tap)
-        sel = Number(b.dataset.i);
+        const i = Number(b.dataset.i);
+        if (!free(i)) return;
+        sel = i;
         answer();
       }));
       if (result) onGo(nextLevel);
     };
 
     const answer = () => {
+      const right = q.options[sel] === q.answer;
+      const zh = data.settings.chinese;
+      if (phase === 'ask') {
+        const s = (g.quiz[type] = g.quiz[type] || { right: 0, tries: 0 });
+        s.tries++;
+        if (right) { s.right++; data.stars++; }
+      }
+      if (right) {
+        phase = phase === 'ask' ? 'right' : 'right2';
+        MQ.Sound.correct();
+        MQ.Voice.say(zh ? '对了!' : 'Correct!', zh ? 'zh-CN' : 'en-US', { interrupt: true });
+      } else if (phase === 'ask') {
+        // One more try: the wrong pick is greyed out and nothing else is marked.
+        phase = 'retry';
+        tried.add(sel);
+        sel = -1;
+        MQ.Sound.wrong();
+        MQ.Voice.say('Not quite. Try again!', 'en-US', { interrupt: true });
+        persist();
+        render();
+        return;
+      } else {
+        phase = 'wrong';
+        tried.add(sel);
+        MQ.Sound.wrong();
+        MQ.Voice.say(`The answer is ${q.answer.replace('¢', ' cents')}`, 'en-US', { interrupt: true });
+      }
       done = true;
       quizOpen = false;
-      const right = q.options[sel] === q.answer;
-      const s = (g.quiz[type] = g.quiz[type] || { right: 0, tries: 0 });
-      s.tries++;
-      if (right) { s.right++; data.stars++; MQ.Sound.correct(); MQ.Voice.say(data.settings.chinese ? '对了!' : 'Correct!', data.settings.chinese ? 'zh-CN' : 'en-US', { interrupt: true }); }
-      else { MQ.Sound.wrong(); MQ.Voice.say(`The answer is ${q.answer.replace('¢', ' cents')}`, 'en-US', { interrupt: true }); }
       persist();
-      render(right ? 'right' : 'wrong');
-      if (right) {
+      render();
+      if (phase === 'right') {
         const b = overlay.querySelector('.choice.right');
         const r = b.getBoundingClientRect();
         MQ.FX.flyStar(r.left + r.width / 2, r.top + r.height / 2, el('star-pill'));
@@ -1051,13 +1255,20 @@
       } else updateHud();
     };
 
+    // Arrow keys move between the choices that are still open (a greyed-out one is skipped).
+    const step = (from, dir) => { let i = from + dir; while (i >= 0 && i < q.options.length && !free(i)) i += dir; return free(i) ? i : from; };
     const keys = (k) => {
       if (done) { if (k === 'Enter' || k === ' ') nextLevel(); return; }
       const n = q.options.length;
       const mid = (n - 1) / 2; // first press steps out of the middle toward the arrow's side
-      if (k === 'ArrowLeft') { sel = sel < 0 ? Math.ceil(mid) - 1 : Math.max(0, sel - 1); nudge = false; MQ.Sound.click(); render(); }
-      else if (k === 'ArrowRight') { sel = sel < 0 ? Math.floor(mid) + 1 : Math.min(n - 1, sel + 1); nudge = false; MQ.Sound.click(); render(); }
-      else if (k === 'Enter' || k === ' ') {
+      if (k === 'ArrowLeft' || k === 'ArrowRight') {
+        const dir = k === 'ArrowLeft' ? -1 : 1;
+        if (sel < 0) {
+          sel = dir < 0 ? Math.ceil(mid) - 1 : Math.floor(mid) + 1;
+          if (!free(sel)) { const s2 = step(sel, dir); sel = free(s2) ? s2 : step(sel, -dir); }
+        } else sel = step(sel, dir);
+        nudge = false; MQ.Sound.click(); render();
+      } else if (k === 'Enter' || k === ' ') {
         if (sel < 0) { nudge = true; MQ.Sound.click(); render(); return; }
         answer();
       }
