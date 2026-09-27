@@ -166,8 +166,9 @@ body {
 .explain .how { display: block; margin-top: 4px; font-weight: 600; color: var(--ink); }
 /* A wrong first pick stays greyed out while he tries once more (nothing else is marked). */
 .choice.tried { opacity: 0.5; }
-.choices.waiting .choice.tried { animation: wobble 0.45s ease-out; }
-@media (prefers-reduced-motion: reduce) { .choices.waiting .choice.tried { animation: none; } }
+.choices .choice.tried { animation: none; }
+.choices .choice.tried.just { animation: wobble 0.45s ease-out; }
+@media (prefers-reduced-motion: reduce) { .choices .choice.tried.just { animation: none; } }
 
 .menu { display: grid; gap: 10px; margin-top: 14px; }
 .menu .btn.sel { outline: 4px solid var(--sky); outline-offset: 3px; }

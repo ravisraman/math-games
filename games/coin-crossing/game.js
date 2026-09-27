@@ -78,6 +78,8 @@
     { level: 1, maxLevel: 1, played: 0, struggles: 0, goodStreak: 0, seconds: 0, history: [], quiz: {} },
     data.games[GAME_ID] || {}
   ));
+  // `recent`: money stars of the last few rounds at this level (for levelling up).
+  g.recent = Array.isArray(g.recent) ? g.recent.filter((n) => n === 1 || n === 2 || n === 3).slice(-4) : [];
   const heroId = MQ.heroId(data.player.hero);
   MQ.Art.preload(heroId);
   const HERO_SIZE = 62; // board units (a cell is 64); the old emoji was 46px
@@ -172,6 +174,7 @@
   // ---------- Game state ----------
   let cfg, target, coins, lanes, laneByRow, player, pouch, stats, targetFmt, pouchFmt;
   let needRevealed = false;
+  let review = false; // this round's target is from a level or two below (spaced review)
   let state = 'intro'; // intro | play | pause | won | result | quiz | quizDone
   let particles = [];
   let floaters = [];
@@ -227,7 +230,11 @@
   function newLevel() {
     cfg = configFor(g.level);
     const step = cfg.step || 1;
-    target = rand(Math.ceil(cfg.min / step), Math.floor(cfg.max / step)) * step;
+    // Spaced review: every third round the target comes from a level or two below, on this
+    // level's board (same coins, traffic and rules). Nothing on screen marks it as special.
+    review = g.level >= 2 && g.played % 3 === 2;
+    const src = review ? configFor(Math.max(1, g.level - rand(1, 2))) : cfg;
+    target = rand(Math.ceil(src.min / step), Math.floor(src.max / step)) * step;
 
     if (cfg.format === 'mixed') {
       const flip = g.played % 2 === 0;
@@ -760,38 +767,47 @@
     setTimeout(() => showResult(praise), 1300);
   }
 
+  // Stars are about the money math only: going over, or guessing at the gate. Car bonks are
+  // shown on the result card but never cost a star (traffic is not the skill).
   function starsFor(s) {
     if (cfg.judge) {
-      // Level 3+: stars are about the money math. Going over or guessing at the gate costs.
       const slips = s.overshoots + s.wrongGate;
-      if (slips === 0 && s.bonks <= 1) return 3;
+      if (slips === 0) return 3;
       if (slips <= 2) return 2;
       return 1;
     }
-    if (s.overshoots <= 1 && s.bonks <= 1) return 3;
-    if (s.overshoots <= 3 && s.bonks <= 3) return 2;
+    if (s.overshoots <= 1) return 3;
+    if (s.overshoots <= 3) return 2;
     return 1;
   }
 
+  // Level up after 2 rounds in a row with 3 stars, or 3 of the last 4 rounds with 2+ stars.
+  // Level down after 2 rounds in a row with 1 star. A review round (an easier target) earns its
+  // stars as usual but doesn't move the level either way.
   function adapt(stars) {
     const before = g.level;
     g.played++;
-    if (stars === 3) {
-      g.level++;
-      g.struggles = 0;
-      g.goodStreak = 0;
-    } else if (stars === 2) {
-      g.struggles = 0;
-      g.goodStreak++;
-      if (g.goodStreak >= 2) { g.level++; g.goodStreak = 0; }
-    } else {
-      g.goodStreak = 0;
-      g.struggles++;
-      if (g.struggles >= 2 && g.level > 1) { g.level--; g.struggles = 0; }
+    if (!review) {
+      const r = (g.recent = Array.isArray(g.recent) ? g.recent : []);
+      r.push(stars);
+      if (r.length > 4) r.splice(0, r.length - 4);
+      const twoThrees = r.length >= 2 && r[r.length - 1] === 3 && r[r.length - 2] === 3;
+      const mostlyGood = r.filter((n) => n >= 2).length >= 3;
+      g.goodStreak = stars >= 2 ? (g.goodStreak || 0) + 1 : 0;
+      g.struggles = stars === 1 ? (g.struggles || 0) + 1 : 0;
+      if (twoThrees || mostlyGood) g.level++;
+      else if (g.struggles >= 2 && g.level > 1) g.level--;
     }
+    if (g.level !== before) { g.recent = []; g.struggles = 0; g.goodStreak = 0; }
     g.maxLevel = Math.max(g.maxLevel, g.level);
     if (g.level > before) return { text: '⬆ Level up!', say: 'Level up! The next one is a little harder.', kind: 'up' };
     if (g.level < before) return { text: '🔁 An easier one next', say: "Let's practice an easier one, then come back up!", kind: 'down' };
+    // Would one more round like this one level him up? Then say so.
+    const r = g.recent || [];
+    const next = [...r, stars].slice(-4);
+    if (!review && stars >= 2 && ((stars === 3 && r[r.length - 1] === 3) || next.filter((n) => n >= 2).length >= 3)) {
+      return { text: '⬆ One more like that to level up', say: 'One more like that and you level up!', kind: 'same' };
+    }
     return { text: '🔁 Once more for ⭐', say: "Let's try this level again to get more stars!", kind: 'same' };
   }
 
@@ -799,7 +815,7 @@
     const stars = starsFor(stats);
     const level = g.level;
     g.history.push({
-      level, stars, target, overshoots: stats.overshoots, bonks: stats.bonks,
+      level, stars, target, overshoots: stats.overshoots, bonks: stats.bonks, wrongGate: stats.wrongGate, review,
       putBacks: stats.putBacks, seconds: Math.round(stats.seconds), date: new Date().toISOString(),
     });
     if (g.history.length > 200) g.history.splice(0, g.history.length - 200);
@@ -983,7 +999,10 @@
       return { hint: `Back to ${a - o} first: ${a} − ${o} = ${a - o}.`, how: `${a} − ${o} = ${a - o}, then ${b - o} more back is ${ans}.` };
     }
     const tens = b - (b % 10);
-    if (b % 10 === 0) return { hint: `Take away ${tens / 10} ten${tens > 10 ? 's' : ''} from ${a}.`, how: `${a} − ${tens} = ${ans}: the ones stay the same.` };
+    if (b % 10 === 0) {
+      const t = Math.floor(a / 10);
+      return { hint: `Take away ${tens / 10} ten${tens > 10 ? 's' : ''} from ${a}.`, how: `${t} tens − ${tens / 10} ten${tens > 10 ? 's' : ''} = ${t - tens / 10} tens, and the ${a % 10} ones stay.` };
+    }
     return {
       hint: `Tens first: ${a} − ${tens} = ${a - tens}. Then take away ${b % 10}.`,
       how: `${a} − ${tens} = ${a - tens}, then ${a - tens} − ${b % 10} = ${ans}.`,
@@ -1160,11 +1179,13 @@
     return types[0];
   }
 
+  let lastQuiz = null; // (for tests)
   function startQuiz() {
     state = 'quiz';
     const type = chooseQuizType();
     const q = QUIZ[type].make(Math.max(1, g.level - 1));
     if (!q.options.includes(q.answer)) q.options[0] = q.answer;
+    lastQuiz = q;
     // Nothing is pre-selected: every choice looks the same until the child picks one
     // (no "leading the witness"). The first arrow press picks from the middle outwards.
     // A wrong first pick gets ONE more try (with a hint that doesn't give the answer away);
@@ -1174,6 +1195,7 @@
     let nudge = false;
     let phase = 'ask'; // ask | retry | right | right2 | wrong
     const tried = new Set(); // wrong picks (greyed out for the second try)
+    let justWrong = false; // the greyed-out pick wobbles once, not on every arrow press
     const free = (i) => i >= 0 && i < q.options.length && !tried.has(i);
 
     let first = true;
@@ -1182,7 +1204,7 @@
       const choices = q.options.map((o, i) => {
         let cls = 'choice';
         if (result) { if (o === q.answer) cls += ' right'; else if (tried.has(i)) cls += ' wrong'; }
-        else if (tried.has(i)) cls += ' wrong tried';
+        else if (tried.has(i)) cls += ` wrong tried${justWrong ? ' just' : ''}`;
         else if (i === sel) cls += ' sel';
         return `<button class="${cls}" data-i="${i}"${!result && tried.has(i) ? ' disabled' : ''}>${MQ.escapeHtml(o)}</button>`;
       }).join('');
@@ -1235,7 +1257,9 @@
         MQ.Sound.wrong();
         MQ.Voice.say('Not quite. Try again!', 'en-US', { interrupt: true });
         persist();
+        justWrong = true;
         render();
+        justWrong = false;
         return;
       } else {
         phase = 'wrong';
@@ -2262,7 +2286,7 @@
   });
 
   // Small hook for automated tests.
-  window.__coinCrossing = { quiz: QUIZ, get state() { return state; }, get target() { return target; }, get coins() { return coins; }, get player() { return player; }, total, get level() { return g.level; }, get layout() { return layout; }, get lanes() { return lanes; }, get grid() { return { cols: COLS, rows: ROWS, castle: CASTLE_H, w: W, h: H }; }, get stats() { return stats; }, get cfg() { return cfg; }, get pouch() { return pouch.map((c) => c.v); }, get gateLift() { return gateLift; }, startQuiz };
+  window.__coinCrossing = { get lastQuiz() { return lastQuiz; }, quiz: QUIZ, adapt, starsFor, newLevel, get review() { return review; }, get save() { return g; }, get state() { return state; }, get target() { return target; }, get coins() { return coins; }, get player() { return player; }, total, get level() { return g.level; }, get layout() { return layout; }, get lanes() { return lanes; }, get grid() { return { cols: COLS, rows: ROWS, castle: CASTLE_H, w: W, h: H }; }, get stats() { return stats; }, get cfg() { return cfg; }, get pouch() { return pouch.map((c) => c.v); }, get gateLift() { return gateLift; }, startQuiz };
 
   // Key reminders float up when he hasn't pressed anything for a while (keyboard players only).
   // (MQ.Idle reads a list whose first item is an array as ONE pair, so each pair goes in as a Set.)
