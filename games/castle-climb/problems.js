@@ -39,13 +39,13 @@
     5: { name: 'Adding & taking away tens', zh: '整十数加减', ledges: 4, pace: 7, example: '40 + 30' },
     6: { name: 'Big number ± small number', zh: '两位数加减一位数', ledges: 4, pace: 9, example: '38 + 5' },
     7: { name: '2-digit + 2-digit', zh: '两位数加两位数', ledges: 4, pace: 10, example: '23 + 45' },
-    8: { name: '2-digit ± 2-digit with regrouping', zh: '进位和退位', ledges: 4, pace: 12, example: '38 + 45' },
+    8: { name: '2-digit ± 2-digit with regrouping', zh: '进位加法和退位减法', ledges: 4, pace: 12, example: '38 + 45' },
     9: { name: 'Three numbers', zh: '三个数相加', ledges: 4, pace: 9, example: '7 + 3 + 6' },
     10: { name: 'Missing numbers', zh: '填空', ledges: 4, pace: 9, example: '7 + ? = 15' },
     11: { name: 'Mixed review', zh: '综合复习', ledges: 4, pace: 10, example: '8 + 7, 62 − 27' },
-    12: { name: 'Bigger missing numbers', zh: '更大的数', ledges: 4, pace: 12, example: '35 + ? = 50' },
-    13: { name: 'Numbers to 100 challenge', zh: '一百以内挑战', ledges: 4, pace: 12, example: '24 + 18 + 30' },
-    14: { name: 'Regrouping mix', zh: '进位退位综合', ledges: 4, pace: 13, example: '47 + 38, 36 + 7 + 25' },
+    12: { name: 'Bigger missing numbers', zh: '更大的数填空', ledges: 4, pace: 12, example: '35 + ? = 50' },
+    13: { name: 'Numbers to 100 challenge', zh: '一百以内的挑战', ledges: 4, pace: 12, example: '24 + 18 + 30' },
+    14: { name: 'Regrouping mix', zh: '进位退位综合练习', ledges: 4, pace: 13, example: '47 + 38, 36 + 7 + 25' },
     15: { name: 'Missing numbers to 100', zh: '一百以内填空', ledges: 4, pace: 14, example: '35 + ? = 72' },
   };
   const TOP_LEVEL = 15;
@@ -149,6 +149,7 @@
   const tensOf = (n) => Math.floor(n / 10) * 10;
   const tensWord = (n) => `${n} ${n === 1 ? 'ten' : 'tens'}`;
 
+  let teenTurn = Math.floor(Math.random() * 3); // which way to explain the next teen take-away
   function tipFor(p) {
     const t = p.terms;
     const op = p.ops[0];
@@ -170,10 +171,24 @@
     if (t.length === 3) {
       const pairs = [[0, 1, 2], [0, 2, 1], [1, 2, 0]];
       for (const [i, j, k] of pairs) {
-        if (t[i] + t[j] === 10) return { tip: `Find ten-friends: ${t[i]} + ${t[j]} = 10. Then add ${t[k]}.` };
+        if (t[i] + t[j] === 10) return { tip: `Find two numbers that make ten first: ${t[i]} + ${t[j]} = 10. Then add ${t[k]}.` };
+      }
+      // Bigger numbers whose ones make ten: 36 + 7 + 24 → 36 + 24 = 60 first.
+      for (const [i, j, k] of pairs) {
+        if (Math.max(t[i], t[j]) >= 10 && (t[i] % 10) + (t[j] % 10) === 10) {
+          return { tip: `Find two numbers whose ones make ten: ${t[i]} + ${t[j]} = ${t[i] + t[j]}. Then add ${t[k]}.` };
+        }
       }
       for (const [i, j, k] of pairs) {
         if (t[i] === t[j]) return { tip: `Find the double: ${t[i]} + ${t[j]} = ${t[i] * 2}. Then add ${t[k]}.` };
+      }
+      // No ten-friends: a 7, 8 or 9 can still make a ten with part of another number.
+      if (t.every((x) => x < 10)) {
+        const [bi, oi, ki] = [0, 1, 2].sort((x, y) => t[y] - t[x]);
+        const need = 10 - t[bi];
+        if (t[bi] >= 7 && t[oi] > need) {
+          return { tip: `Make a ten: ${t[bi]} + ${t[oi]} = 10 + ${t[oi] - need}. Then add ${t[ki]}.` };
+        }
       }
       return { tip: `Add two first: ${t[0]} + ${t[1]} = ${t[0] + t[1]}. Then add ${t[2]}.` };
     }
@@ -198,7 +213,7 @@
         const need = 10 - big;
         return { tip: `Make a ten: ${big} + ${need} = 10, then ${small - need} more.` };
       }
-      if (big === 10) return { tip: `10 + ${small} is 1 ten and ${small} ones. What number is that?`, more: `It is ${s}.` };
+      if (big === 10) return { tip: `10 + ${small} is 1 ten and ${small} ${small === 1 ? 'one' : 'ones'}. What number is that?`, more: `It is ${s}.` };
       if (s <= 20) return { tip: `${big} is 1 ten and ${big - 10} ones. Add the ones: ${big - 10} + ${small} = ?`, more: `1 ten and ${big - 10 + small} ones is ${s}.` };
       if (small < 10) {
         const ones = big % 10;
@@ -215,8 +230,23 @@
     if (a % 10 === 0 && b % 10 === 0 && b >= 10) {
       return { tip: `${cap(tensWord(a / 10))} − ${tensWord(b / 10)} = how many tens?`, more: `${cap(tensWord((a - b) / 10))} is ${a - b}.` };
     }
+    if (a === b) return { tip: `Take away all of them and nothing is left.` };
+    // Taking away 1, 2 or 3: count back.
+    if (b <= 3 && (a <= 20 || b <= a % 10)) {
+      const seq = [];
+      for (let n = a - 1; n >= a - b; n--) seq.push(n);
+      return { tip: `Start at ${a} and count back ${b}.`, more: `${a}… ${seq.join(', ')}.` };
+    }
+    if (a <= 10 || (a <= 20 && b >= 10)) return { tip: `Think addition: ${b} + ? = ${a}.`, more: `${b} + ${ans} = ${a}.` };
     if (a <= 20) {
-      if (a === b) return { tip: `Take away all of them and nothing is left.` };
+      const ones = a - 10;
+      const bond = `${a} is 10 and ${ones}.`;
+      if (b === ones) return { tip: `${bond} Take away the ${ones}. What is left?`, more: `The 10 is left.` };
+      if (b <= ones) return { tip: `${bond} Take ${b} from the ${ones}, then add the 10.`, more: `${ones} − ${b} = ${ones - b}, and 10 + ${ones - b} = ${ans}.` };
+      // Crossing ten: take turns with three ways, so he meets them all.
+      const way = teenTurn++ % 3;
+      if (way === 0) return { tip: `${bond} Take ${b} from the 10: 10 − ${b} = ${10 - b}. Then what is ${10 - b} + ${ones}?`, more: `${10 - b} + ${ones} = ${ans}.` };
+      if (way === 1) return { tip: `${bond} ${a} − ${ones} = 10, then take away ${b - ones} more. What is 10 − ${b - ones}?`, more: `10 − ${b - ones} = ${ans}.` };
       return { tip: `Think addition: ${b} + ? = ${a}.`, more: `${b} + ${ans} = ${a}.` };
     }
     if (b < 10) {
@@ -475,9 +505,75 @@
     // Near misses and tens slips mixed: {0,1,2,3} ∪ {10,11,12,13}.
     return { pool: [0, 1, 2, 3, 10, 11, 12, 13] };
   }
+  // The mistakes kids really make with 2-digit numbers, for this problem (value → why).
+  //  • forgot to regroup: 48 + 29 → 67 (the carried ten is lost); 52 − 27 → 35 (no ten was broken)
+  //  • smaller from larger: 52 − 27 → ones 7 − 2 = 5 instead of 12 − 7
+  const tensPart = (n) => Math.floor(n / 10) * 10;
+  function subSlips(big, small) { // big − small where the ones need a ten broken
+    if (big % 10 >= small % 10 || big < 20) return [];
+    return [
+      [big - small + 10, 'forgot to regroup'],
+      [tensPart(big) - tensPart(small) + (small % 10) - (big % 10), 'smaller from larger'],
+    ];
+  }
+  function misconceptions(p) {
+    const t = p.terms;
+    const op = p.ops[0];
+    if (p.skill === 'tens' || !t.some((x) => x >= 10)) return [];
+    if (p.blank >= 0) {
+      const R = p.value;
+      if (op === '+') return subSlips(R, t[1 - p.blank]); // 35 + ? = 72 → 72 − 35
+      if (p.blank === 1) return subSlips(t[0], R); // 81 − ? = 36 → 81 − 36
+      return (t[1] % 10) + (R % 10) >= 10 ? [[p.answer - 10, 'forgot to regroup']] : []; // ? − 28 = 45 → 28 + 45
+    }
+    if (t.length === 3) {
+      const carries = Math.floor(t.reduce((s, x) => s + (x % 10), 0) / 10);
+      return carries ? [[p.answer - 10 * carries, 'forgot to regroup']] : [];
+    }
+    if (op === '+') return (t[0] % 10) + (t[1] % 10) >= 10 ? [[p.answer - 10, 'forgot to regroup']] : [];
+    return subSlips(t[0], t[1]);
+  }
+
+  // 2-digit problems: one or two real mistakes, then numbers that share the answer's ones digit
+  // (±10, ±20) or its ten (±1, ±2, ±3). At least one of each, so getting just the ones (or just
+  // the tens) right is not enough, and the answer's place in the row (lowest…highest) is random.
+  function bigDistractors(p, n, lo, hi) {
+    const ans = p.answer;
+    const ok = (v) => Number.isInteger(v) && v >= lo && v <= hi && v !== ans;
+    const sameOnes = shuffle([10, -10, 20, -20].map((k) => ans + k).filter(ok));
+    const sameTen = shuffle([1, -1, 2, -2, 3, -3].map((k) => ans + k).filter((v) => ok(v) && tensPart(v) === tensPart(ans)));
+    const other = shuffle([9, -9, 11, -11, 4, -4].map((k) => ans + k).filter(ok));
+    const mis = shuffle(misconceptions(p).filter(([v]) => ok(v)));
+    const wanted = rand(0, n); // how many choices sit below the answer
+    for (let tries = 0; tries < 90; tries++) {
+      const rank = tries < 60 ? wanted : -1; // (-1: any, for answers at the edge of the range)
+      const out = [];
+      const why = {};
+      const below = () => out.filter((v) => v < ans).length;
+      const fits = (v) => rank < 0 || (v < ans ? below() < rank : out.length - below() < n - rank);
+      const put = (v, w) => { if (out.length < n && !out.includes(v) && fits(v)) { out.push(v); if (w) why[v] = w; return true; } return false; };
+      if (mis.length && put(mis[0][0], mis[0][1]) && mis[1] && chance(0.3)) put(mis[1][0], mis[1][1]);
+      while (out.length < n) {
+        const ones = out.filter((v) => v % 10 === ans % 10).length;
+        const ten = out.filter((v) => tensPart(v) === tensPart(ans)).length;
+        const first = ones < 2 ? sameOnes : ten < 1 ? sameTen : chance(0.5) ? sameOnes : sameTen;
+        if (![first, sameOnes, sameTen, other].some((list) => list.some((v) => put(v)))) break;
+      }
+      if (out.length < n) continue;
+      if (!out.some((v) => v % 10 === ans % 10)) continue;
+      out.why = why;
+      return shuffle(out);
+    }
+    return null;
+  }
+
   function distractors(p, n) {
     const ans = p.answer;
     const { pool, tens } = shapeFor(p, n);
+    if (!tens && n >= 3 && (ans >= 20 || p.value >= 20 || p.terms.some((x) => x >= 20))) {
+      const out = bigDistractors(p, n, p.ops.includes('-') || p.blank >= 0 ? 0 : 1, 109);
+      if (out) return out;
+    }
     const lo = p.ops.includes('-') || p.blank >= 0 ? 0 : tens ? 10 : 1; // adding never makes 0
     const hi = tens ? 120 : ans <= 10 ? 20 : ans <= 20 ? 30 : 109; // stay close to 2nd-grade numbers (to 100)
     for (let tries = 0; tries < 200; tries++) {

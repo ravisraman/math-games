@@ -159,7 +159,7 @@
     heroP.sq = heroP.sqV = 0;
     queuedMove = 0;
     queuedJump = false;
-    stats = { firstTry: 0, speedy: 0, seconds: 0, times: [], retry: [], keys: [], missedKeys: [], leitner: 0 };
+    stats = { firstTry: 0, speedy: 0, seconds: 0, times: [], retry: [], keys: [], missedKeys: [], leitner: 0, spacedFloor: 2 + Math.floor(Math.random() * 6), spacedDone: false };
     floorsDone = [];
     particles = []; floaters = []; chunks = []; puffs = []; rockets = []; skyLanterns = [];
     topT = 0;
@@ -198,7 +198,14 @@
       const p = pickMissed();
       if (p) { stats.leitner++; p.source = 'review'; return p; }
     }
-    // 3) A new fact for this level.
+    // 3) Spaced review: one floor (never the first two) brings back the level below's skill.
+    if (g.level > 1 && !stats.spacedDone && floor >= stats.spacedFloor) {
+      stats.spacedDone = true;
+      const p = P.make(g.level - 1, { floor, skills: g.skills, avoid: stats.keys.slice(-6) });
+      p.source = 'spaced';
+      return p;
+    }
+    // 4) A new fact for this level.
     const p = P.make(g.level, { floor, skills: g.skills, avoid: stats.keys.slice(-6) });
     p.source = 'new';
     return p;
