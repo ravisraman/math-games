@@ -34,6 +34,8 @@
     { level: 1, maxLevel: 1, played: 0, seconds: 0, history: [], skills: {}, struggles: 0, goodStreak: 0 },
     data.games[GAME_ID] || {}
   ));
+  // (Older saves counted 2★ puzzles in goodStreak; it now counts 3★ puzzles in a row.)
+  if (!Array.isArray(g.recent)) { g.recent = []; g.goodStreak = 0; }
   function persist() { MQ.save(data); }
   const heroId = MQ.heroId(data.player.hero);
   MQ.Art.preload(heroId);
@@ -216,14 +218,20 @@
     return c;
   }
 
+  // Spaced review: about 1 puzzle in 4 (from level 2), one pair gets an easier target from a
+  // lower level (its route's numbers and target come from that level; the rest of the board and
+  // the level rules stay as they are). review = { p, cfg } or null.
+  const pairCfg = (cfg, review, p) => (review && review.p === p ? review.cfg : cfg);
+
   // One candidate board (walks + numbers), or null if the walks didn't fit.
-  function layout(cfg) {
+  function layout(cfg, review) {
     const n = cfg.n;
     const used = new Uint8Array(n * n);
     const walks = [];
     for (let k = 0; k < cfg.pairs; k++) {
       let walk = null;
-      for (let t = 0; t < 60 && !walk; t++) walk = randomWalk(n, used, rand(cfg.len[0], cfg.len[1]) + 2);
+      const len = pairCfg(cfg, review, k).len;
+      for (let t = 0; t < 60 && !walk; t++) walk = randomWalk(n, used, rand(len[0], len[1]) + 2);
       if (!walk) return null;
       walk.forEach((i) => { used[i] = 1; });
       walks.push(walk);
@@ -244,16 +252,17 @@
     pairs.forEach((pr, p) => {
       const inner = pr.sol.slice(1, -1);
       inner.forEach((i) => { owner[i] = p; });
+      const pc = pairCfg(cfg, review, p);
       let nums;
       for (let t = 0; t < 60; t++) {
-        nums = inner.map(() => randNum(cfg));
+        nums = inner.map(() => randNum(pc));
         const s = nums.reduce((a, b) => a + b, 0);
-        if (s <= cfg.maxT && (s >= cfg.minT || t > 40)) break;
+        if (s <= pc.maxT && (s >= pc.minT || t > 40)) break;
       }
       let s = nums.reduce((a, b) => a + b, 0);
-      while (s > cfg.maxT) { // safety: shrink the biggest numbers until it fits
+      while (s > pc.maxT) { // safety: shrink the biggest numbers until it fits
         const j = nums.indexOf(Math.max(...nums));
-        const cut = Math.min(nums[j] - 1, s - cfg.maxT);
+        const cut = Math.min(nums[j] - 1, s - pc.maxT);
         nums[j] -= cut; s -= cut;
       }
       inner.forEach((i, k) => { cells[i].num = nums[k]; });
@@ -263,16 +272,17 @@
     return { cells, pairs, dists, owner };
   }
 
-  function generate(L, forcePairs) {
+  function generate(L, forcePairs, reviewLevel) {
     const cfg = configFor(L);
     if (forcePairs) cfg.pairs = forcePairs;
+    const review = reviewLevel && reviewLevel < L ? { p: rand(0, cfg.pairs - 1), cfg: configFor(reviewLevel), level: reviewLevel } : null;
     const n = cfg.n;
     const nbr = Array.from({ length: n * n }, (_, i) => neighbors(i, n));
     const t0 = clock();
     let best = null, bestCost = Infinity;
     for (let attempt = 0; attempt < 600; attempt++) {
       if (best && clock() - t0 > 40) break; // good enough — don't keep him waiting
-      const cand = layout(cfg);
+      const cand = layout(cfg, review);
       if (!cand) continue;
       const { cells, pairs, dists, owner } = cand;
       const check = (p) => checkPair(n, cells, pairs[p], dists[p], cfg, nbr);
@@ -289,12 +299,13 @@
           do { i = rand(0, n * n - 1); } while (cells[i].pair >= 0);
         }
         const old = cells[i].num;
-        const v = randNum(cfg);
-        if (v === old) continue;
         const q = owner[i];
+        const pc = q >= 0 ? pairCfg(cfg, review, q) : cfg;
+        const v = randNum(pc);
+        if (v === old) continue;
         if (q >= 0) { // on an intended path: its target moves too, and must stay in range
           const t = pairs[q].target + v - old;
-          if (t < cfg.minT || t > cfg.maxT) continue;
+          if (t < pc.minT || t > pc.maxT) continue;
           pairs[q].target = t;
         }
         cells[i].num = v;
@@ -305,13 +316,13 @@
       }
       if (cost < bestCost) {
         bestCost = cost;
-        best = { n, cfg, cells: cells.map((c) => ({ num: c.num, pair: c.pair })), pairs: pairs.map((pr) => Object.assign({}, pr)), level: L, cost: Math.floor(cost) };
+        best = { n, cfg, cells: cells.map((c) => ({ num: c.num, pair: c.pair })), pairs: pairs.map((pr) => Object.assign({}, pr)), level: L, cost: Math.floor(cost), review: review ? { p: review.p, level: review.level } : null };
       }
       if (cost < 1 && (cost === 0 || clock() - t0 > 6)) break;
     }
     if (best) return best;
     const fewer = (forcePairs || cfg.pairs) - 1;
-    if (fewer >= 1) return generate(L, fewer); // board too crowded: one fewer pair
+    if (fewer >= 1) return generate(L, fewer, reviewLevel); // board too crowded: one fewer pair
     return generate(Math.max(1, L - 1)); // never loop forever: fall back to an easier level's board
   }
 
@@ -343,6 +354,7 @@
   // A hint shows at most half of a route, and there is a short wait between hints.
   const HINT_WAIT = 10; // seconds of play between two hints
   let hintSeen = [];
+  let tenTold = []; // tenTold[p]: the "look for ten-friends" tip was given for pair p
   let lastHintAt = -Infinity; // stats.seconds when the last hint was given
   let toldHead = false; // "add them up in your head!" has been spoken this puzzle
   // Wash-to-reveal: a muddy picture of his next town piece; each pair joined with the right sum
@@ -354,7 +366,9 @@
   const live = () => puzzle.cfg.liveSum !== false;
 
   function newPuzzle() {
-    puzzle = generate(g.level);
+    // Spaced review (level 2+, about 1 puzzle in 4): one pair's target comes from 1-3 levels lower.
+    const reviewLevel = g.level >= 2 && Math.random() < 0.25 ? rand(Math.max(1, g.level - 3), g.level - 1) : 0;
+    puzzle = generate(g.level, 0, reviewLevel);
     // (A very crowded board can fall back to an easier level's board: keep his level's rule.)
     puzzle.cfg.liveSum = configFor(g.level).liveSum;
     paths = puzzle.pairs.map(() => []);
@@ -363,6 +377,7 @@
     firstArrival = puzzle.pairs.map(() => true);
     stats = { hints: 0, resets: 0, wrongs: 0, undos: 0, seconds: 0 };
     hintSeen = puzzle.pairs.map(() => new Set());
+    tenTold = puzzle.pairs.map(() => false);
     lastHintAt = -Infinity;
     toldHead = false;
     doneGrab = null;
@@ -391,6 +406,25 @@
     return paths[p].filter((i) => puzzle.cells[i].pair < 0).map((i) => puzzle.cells[i].num);
   }
   const sumOf = (p) => terms(p).reduce((a, b) => a + b, 0);
+  // Two numbers that make 10 ("ten-friends"): [i, j] positions in `t`, next-door ones first.
+  function tenPair(t) {
+    for (let i = 0; i + 1 < t.length; i++) if (t[i] < 10 && t[i] + t[i + 1] === 10) return [i, i + 1];
+    for (let i = 0; i < t.length; i++) for (let j = i + 2; j < t.length; j++) if (t[i] < 10 && t[i] + t[j] === 10) return [i, j];
+    return null;
+  }
+  // A right sum with ten-friends on the path, grouped: "8 + 2 = 10, + 5 = 15" (null if none).
+  function groupedSum(p) {
+    const t = terms(p);
+    const tp = t.length >= 3 && tenPair(t);
+    if (!tp) return null;
+    const rest = t.filter((_, k) => !tp.includes(k));
+    const s = sumOf(p);
+    return {
+      text: `${t[tp[0]]} + ${t[tp[1]]} = 10, + ${rest.join(' + ')} = ${s}`,
+      html: `${t[tp[0]]} + ${t[tp[1]]} <span class="eq">=</span> 10, + ${rest.join(' + ')} <span class="eq">=</span> <span class="total">${s}</span>`,
+      spoken: `${t[tp[0]]} plus ${t[tp[1]]} makes 10, plus ${rest.join(' plus ')} makes ${s}`,
+    };
+  }
   function isComplete(p) {
     const P = paths[p];
     return P.length >= 2 && P[P.length - 1] === partnerOf(p, P[0]);
@@ -556,7 +590,8 @@
       paths[p].forEach((i, k) => setTimeout(() => { const c = cellCenter(i); burst(c.x, c.y, pr.color.light, 6); }, k * 60));
       for (const i of [pr.a, pr.b]) { const c = cellCenter(i); blocks.burst(c.x, c.y, [pr.color.c, pr.color.light, pr.color.dark, '#ffe066'], 12, 0.8); }
       heroCheer(1.8);
-      const words = `${t.join(' plus ')} equals ${s}`;
+      const gs = groupedSum(p);
+      const words = gs ? gs.spoken : `${t.join(' plus ')} equals ${s}`;
       const done = puzzle.pairs.every((_, q) => isCorrect(q));
       if (!done) {
         const praise = MQ.pick(MQ.PRAISE);
@@ -602,12 +637,34 @@
   const hintCap = (p) => Math.max(1, Math.floor((puzzle.pairs[p].sol.length - 2) / 2));
   const hintWait = () => Math.max(0, Math.ceil(HINT_WAIT - (stats.seconds - lastHintAt)));
 
+  function hintTooSoon() {
+    const wait = hintWait();
+    if (wait <= 0) return false;
+    MQ.Sound.note(55, 'wood', { dur: 0.12, vel: 0.25 });
+    say(`🤔 Hint in ${wait} s`);
+    MQ.Voice.say('Try it yourself first! Another hint soon.', 'en-US', { interrupt: true });
+    return true;
+  }
+
   function hint() {
     let p = drawing >= 0 && !isCorrect(drawing) ? drawing : -1;
     if (p < 0 && !isCorrect(active)) p = active;
     if (p < 0) p = puzzle.pairs.findIndex((_, k) => !isCorrect(k));
     if (p < 0) return;
     const pr = puzzle.pairs[p];
+    // First hint on a pair whose route has ten-friends: the strategy, no cells shown (a hint all the same).
+    if (!tenTold[p] && tenPair(pr.sol.slice(1, -1).map((i) => puzzle.cells[i].num))) {
+      if (hintTooSoon()) return;
+      tenTold[p] = true;
+      stats.hints++;
+      lastHintAt = stats.seconds;
+      active = p;
+      MQ.Sound.star();
+      say('💡 Look for ten-friends! (numbers that make 10)');
+      MQ.Voice.say('Look for ten-friends! Numbers that make 10.', 'en-US', { interrupt: true });
+      updateHud();
+      return;
+    }
     const P = paths[p];
     const S = P.length && P[0] === pr.sol[pr.sol.length - 1] ? [...pr.sol].reverse() : pr.sol;
     let k = 0;
@@ -626,13 +683,7 @@
       updateHud();
       return;
     }
-    const wait = hintWait();
-    if (wait > 0) {
-      MQ.Sound.note(55, 'wood', { dur: 0.12, vel: 0.25 });
-      say(`🤔 Hint in ${wait} s`);
-      MQ.Voice.say('Try it yourself first! Another hint soon.', 'en-US', { interrupt: true });
-      return;
-    }
+    if (hintTooSoon()) return;
     hintSeen[p].add(shown);
     lastHintAt = stats.seconds;
     // Anything else sitting on those cells gets trimmed back so the hint path fits.
@@ -709,7 +760,9 @@
       sent.innerHTML = `${t.join(' + ')} <span class="eq">=</span> <span class="total">?</span>`;
       need.textContent = `Add them up! Make ${pr.target}.`;
     } else {
-      sent.innerHTML = `${t.join(' + ')} <span class="eq">=</span> <span class="total">${s}</span>`;
+      const gs = isCorrect(p) && groupedSum(p);
+      sent.innerHTML = gs ? gs.html : `${t.join(' + ')} <span class="eq">=</span> <span class="total">${s}</span>`;
+      if (gs) sent.classList.add('long');
       if (isCorrect(p)) { need.textContent = `✅ Exactly ${pr.target}!`; need.classList.add('done'); }
       else if (s === pr.target) { need.textContent = '🎯 Now go to the dot'; need.classList.add('done'); }
       else if (s > pr.target) { need.textContent = `Too much! ${s - pr.target} over ↩`; need.classList.add('over'); }
@@ -1035,26 +1088,30 @@
 
   function starsFor(s) {
     if (s.hints === 0 && s.resets === 0 && s.wrongs <= 1) return 3;
-    if (s.hints <= 1 && s.resets <= 1 && s.wrongs <= 3) return 2; // (guessing route after route isn't 2★)
+    if (s.hints <= 1 && s.resets <= 1 && s.wrongs <= 2) return 2; // (guessing route after route isn't 2★)
     return 1;
   }
 
+  // Level up after 2 puzzles in a row with 3★, or 3 of the last 4 with 2★ or more (puzzles at
+  // this level). Level down after 2 puzzles in a row with 1★. g.recent = stars of the last
+  // (up to 4) puzzles at this level; it starts over when the level changes.
   function adapt(stars) {
     const before = g.level;
     g.played++;
-    if (stars === 3) {
-      g.level++;
+    if (!Array.isArray(g.recent)) g.recent = [];
+    g.recent.push(stars);
+    if (g.recent.length > 4) g.recent.splice(0, g.recent.length - 4);
+    const r = g.recent;
+    if (stars >= 2) {
       g.struggles = 0;
-      g.goodStreak = 0;
-    } else if (stars === 2) {
-      g.struggles = 0;
-      g.goodStreak++;
-      if (g.goodStreak >= 2) { g.level++; g.goodStreak = 0; }
+      g.goodStreak = stars === 3 ? (g.goodStreak || 0) + 1 : 0; // 3★ puzzles in a row
+      if (g.goodStreak >= 2 || r.filter((x) => x >= 2).length >= 3) g.level++;
     } else {
       g.goodStreak = 0;
       g.struggles++;
       if (g.struggles >= 2 && g.level > 1) { g.level--; g.struggles = 0; }
     }
+    if (g.level !== before) { g.recent = []; g.goodStreak = 0; }
     g.maxLevel = Math.max(g.maxLevel, g.level);
     if (g.level > before) return { text: '⬆ Level up! The next puzzle is a little harder.', kind: 'up' };
     if (g.level < before) return { text: "Let's practice an easier one, then come back up!", kind: 'down' };
@@ -1086,7 +1143,7 @@
     if (stars) setTimeout(() => MQ.Sound.star(), 200);
     if (stats.hints > 1) setTimeout(() => MQ.Voice.say('Hints help you learn! Next time, try adding more of them up yourself.', 'en-US'), 900);
     const starHtml = [1, 2, 3].map((i) => `<span class="${i <= stars ? '' : 'off'}">⭐</span>`).join('');
-    const sums = puzzle.pairs.map((pr, p) => `<div>${dotHtml(pr, true)} ${terms(p).join(' + ')} = ${sumOf(p)}</div>`).join('');
+    const sums = puzzle.pairs.map((pr, p) => { const gs = groupedSum(p); return `<div>${dotHtml(pr, true)} ${gs ? gs.text : `${terms(p).join(' + ')} = ${sumOf(p)}`}</div>`; }).join('');
     const moveShort = { up: '⬆️ Level up!', down: '🌱 Easier one next', same: '🔁 Go for ⭐⭐⭐!' }[move.kind];
     setTimeout(() => MQ.Voice.say(move.text, 'en-US'), 400);
     showOverlay(`
@@ -1959,7 +2016,8 @@
     get keyMode() { return keyMode; },
     get layout() { return compact ? (root.classList.contains('nf-land') ? 'landscape' : 'portrait') : 'laptop'; },
     isCorrect: (p) => isCorrect(p),
-    generate, configFor,
+    generate, configFor, starsFor, adapt, tenPair, groupedSum,
+    get g() { return g; },
   };
 
   // Keyboard players: after a few quiet seconds the keys that matter float up (laptop: at the

@@ -119,9 +119,11 @@
     if (m < 10) return `${base}零${MQ.zhNumber(m)}分`;
     return `${base}${MQ.zhNumber(m)}分`;
   }
+  // 30 → 半个小时, 90 → 一个半小时, 120 → 两个小时, 75 → 一个小时十五分钟, 45 → 四十五分钟
   function zhDur(d) {
     const h = Math.floor(d / 60);
     const m = d % 60;
+    if (m === 30) return h ? `${zhHour(h)}个半小时` : '半个小时';
     let s = '';
     if (h) s += `${zhHour(h)}个小时`;
     if (m) s += `${MQ.zhNumber(m)}分钟`;
@@ -378,14 +380,18 @@
     };
   }
 
+  // Level 1 is o'clock & half past only: no :15 / :45 choices (those are level 2).
+  const fitsLevel = (c) => (x) => c.L > 1 || (minOf(x) !== 15 && minOf(x) !== 45);
+
   function makeRead(c) {
     const t = randTime(c);
+    const ok = fitsLevel(c);
     return {
       type: 'read', mode: 'choice', variant: 'read', show: t, reveal: t,
       lines: ['What time does the clock show?'],
       zh: '现在几点?', zhAfter: zhTime(t),
       speak: 'What time does the clock show?',
-      ...buildRanked(t, readMistakes(t), [t + 60, t - 60, t + 30, t - 30, t + 15, t - 15, t + 5, t - 5], fmt, looksClock),
+      ...buildRanked(t, readMistakes(t).filter(ok), [t + 60, t - 60, t + 30, t - 30, t + 15, t - 15, t + 5, t - 5].filter(ok), fmt, looksClock),
       answerText: fmt(t), answerSpeak: speakTime(t),
       explain: explainTime(t),
     };
@@ -434,13 +440,14 @@
   }
 
   // "Which time is half past 8?" — the said number (8) must not single out the answer.
-  function digitalChoices(t) {
+  function digitalChoices(t, c) {
     const h = hourOf(t);
     const m = minOf(t);
     const isTo = m > 30;
     const nx = hourOf(t + 60);
     // Other minutes = classic mix-ups: past ↔ to, "a quarter is 25", or the number the long hand is on.
-    const m2s = { 0: [30, 12], 30: [0, 6, 45], 15: [45, 25, 3], 45: [15, 9] }[m] || (m % 5 === 0 ? [60 - m, m / 5] : [60 - m]);
+    const m2s = ({ 0: [30, 12], 30: [0, 6, 45], 15: [45, 25, 3], 45: [15, 9] }[m] || (m % 5 === 0 ? [60 - m, m / 5] : [60 - m]))
+      .filter((m2) => fitsLevel(c)(m2));
     // "Past" times: the said number is the answer's hour, so keep that hour on two options.
     // "To" times: the said number is the next hour — the classic trap — so it is usually in.
     const roles = isTo ? [0, 1, 2] : [0, 1];
@@ -477,7 +484,7 @@
         type: 'words', mode: 'choice', variant: 'toDigital', show: null, reveal: t,
         lines: [`Which time is {${words}}?`], zh: '', zhAfter: zhTime(t),
         speak: `Which time is ${words}?`,
-        ...digitalChoices(t),
+        ...digitalChoices(t, c),
         answerText: fmt(t), answerSpeak: speakTime(t), explain,
       };
     }
@@ -665,6 +672,10 @@
   let recentTypes = [];
   let usedAnswers = [];
   let forcedNext = null; // test hook: ask a particular kind of question next
+  // Spaced review (level 2+): one floor of each climb (not the first or the top) asks a question
+  // from an earlier level. It counts like any other floor.
+  let reviewAt = -1;
+  let reviewDone = false;
   let stats = null;
   let lastRight = false;
   let fbLines = [];
@@ -751,6 +762,8 @@
     recentTypes = [];
     usedAnswers = [];
     wrongStreak = 0;
+    reviewAt = g.level >= 2 ? rand(1, FLOORS - 2) : -1;
+    reviewDone = false;
     stats = { seconds: 0, hints: 0, wrong: 0, asked: 0 };
     heroAnim.from = heroAnim.to = 0;
     heroAnim.t = 1;
@@ -787,13 +800,34 @@
     anim = { from: disp, to, t: 0, dur: Math.max(0.01, dur) };
   }
 
+  // An earlier level (the last 6 levels at most, the ones that differ) and one of its question kinds.
+  function reviewPick() {
+    const rc = cfgFor(rand(1, Math.min(g.level - 1, 6)));
+    const types = Object.keys(rc.mix);
+    let x = Math.random() * types.reduce((a, k) => a + rc.mix[k], 0);
+    for (const k of types) { x -= rc.mix[k]; if (x <= 0) return { type: k, c: rc }; }
+    return { type: types[0], c: rc };
+  }
+
   function nextQuestion() {
-    const type = forcedNext ? forcedNext.type : chooseType();
+    let type;
+    let qc = cfg;
+    if (!forcedNext && floor === reviewAt && !reviewDone) {
+      reviewDone = true;
+      ({ type, c: qc } = reviewPick());
+    } else {
+      type = forcedNext ? forcedNext.type : chooseType();
+    }
     recentTypes.push(type);
     // Fresh times each question: re-roll if this answer already came up this round.
     for (let i = 0; i < 12; i++) {
-      q = MAKERS[type](cfg, forcedNext ? forcedNext.variant : undefined);
+      q = MAKERS[type](qc, forcedNext ? forcedNext.variant : undefined);
       if (!usedAnswers.includes(q.answerText)) break;
+    }
+    if (qc !== cfg) {
+      q.review = qc.L;
+      // (At the 1-minute levels the hands start near the answer, as in his other questions.)
+      if (q.mode === 'set' && !q.wedge && cfg.step === 1) q.start = startFor(q.target, cfg);
     }
     forcedNext = null;
     usedAnswers.push(q.answerText);
@@ -3334,6 +3368,7 @@
     get phase() { return phase; },
     get level() { return g.level; },
     get floor() { return floor; },
+    get reviewAt() { return reviewAt; },
     get firstTry() { return firstTry; },
     get question() {
       if (!q) return null;
@@ -3343,7 +3378,7 @@
         targetText: q.target != null ? fmt(q.target) : null,
         answer: q.answer != null ? q.answer : q.answerText,
         answerIdx: q.answerIdx, options: q.options ? [...q.options] : null,
-        lines: q.lines, zh: q.zh, sel, clock: norm(clockT), step: cfg.step,
+        lines: q.lines, zh: q.zh, sel, clock: norm(clockT), step: cfg.step, review: q.review || 0,
       };
     },
     get disp() { return disp; },
